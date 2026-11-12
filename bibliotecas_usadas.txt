@@ -1,0 +1,17 @@
+BIBLIOTECAS USADAS NO SCANNER (detector.py):
+
+pydantic - Estrutura os tipos (ItemSensivel e Relatorio) e valida os dados retornados.
+instructor - Garante que o modelo local retorne respostas estritamente estruturadas para o pydantic.
+openai - Biblioteca base do instructor para as chamadas do modelo.
+httpx - Cliente HTTP pra fazer as conexoes diretas ignorando interferencia de proxy do Windows.
+pdfplumber - Leitura e extracao de pdf para analise.
+pytesseract - Integra o Python ao mecanismo Tesseract para OCR de PDFs digitalizados e imagens.
+Pillow - Abre/prepara imagens e permite renderizar páginas do PDF para OCR.
+reportlab (opcional) - Gera relatorio em PDF com dados falsos para testar analise.
+
+Comando para instalar todas as bibliotecas:
+python -m pip install pydantic instructor openai httpx pdfplumber pytesseract Pillow reportlab
+
+IMPORTANTE: pytesseract é apenas a ponte Python. Também instale o Tesseract OCR para Windows,
+incluindo o idioma português (por). Se o executável não estiver no PATH, configure TESSERACT_CMD
+com o caminho completo de tesseract.exe (por exemplo, C:\Program Files\Tesseract-OCR\tesseract.exe).
