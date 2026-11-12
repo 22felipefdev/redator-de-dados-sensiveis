@@ -1,0 +1,92 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>PrivacyDocs</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <aside class="sidebar">
+        <h2>🔒 PrivacyDocs</h2>
+
+        <nav>
+            <a href="#">Início</a>
+            <a href="#">Novo documento</a>
+        </nav>
+
+        <p>Sua privacidade é nossa prioridade.</p>
+    </aside>
+
+    <main>
+
+        <header>
+            <h1>Anonimização de Documentos</h1>
+            <p>
+                Envie seu PDF, revise os dados e baixe
+                a versão anonimizada.
+            </p>
+        </header>
+
+        <section class="upload">
+            <h2>Enviar documento</h2>
+
+            <input
+                type="file"
+                id="arquivo"
+                accept=".pdf,application/pdf"
+            >
+
+            <p id="mensagem">
+                Selecione um arquivo PDF.
+            </p>
+        </section>
+
+        <section class="dados">
+            <h2>Dados identificados</h2>
+
+            <p>
+                Selecione as informações que deseja anonimizar.
+            </p>
+
+            <div id="lista-dados"></div>
+        </section>
+
+        <section class="preview">
+            <h2>Visualização do resultado</h2>
+
+            <div id="previa">
+                A pré-visualização aparecerá aqui.
+            </div>
+        </section>
+
+        <section class="download">
+            <h2>Baixar documento</h2>
+
+            <p>
+                Os dados temporários serão limpos após o processamento.
+            </p>
+
+            <button id="baixar" disabled>
+                Baixar PDF Anonimizado
+            </button>
+        </section>
+
+    </main>
+
+    <!-- Biblioteca para leitura de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <!-- Biblioteca para geração de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+    <!-- JavaScript do projeto -->
+    <script src="script.js"></script>
+
+</body>
+</html>
