@@ -9,7 +9,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from regex_parser import extrair_evidencias, normalizar_digitos
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 class ItemSensivel(BaseModel):
@@ -23,22 +23,16 @@ class Relatorio(BaseModel):
 
 
 def identificar_dados_sensiveis(texto: str, evidencias_regex=None) -> Relatorio:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY").strip()
 
-    if not api_key:
-        raise RuntimeError(
-            "Configure a variável de ambiente OPENROUTER_API_KEY no Windows."
-        )
     if evidencias_regex is None:
         evidencias_regex = extrair_evidencias(texto)
-
-    http_client = httpx.Client()
 
     client = instructor.from_openai(
         OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
-            http_client=http_client,
+            http_client=httpx.Client(),
         ),
         mode=instructor.Mode.JSON,
     )
@@ -91,3 +85,24 @@ def identificar_dados_sensiveis(texto: str, evidencias_regex=None) -> Relatorio:
         ],
         temperature=0.0
     )
+    emails_regex = {
+        email.strip().casefold()
+        for email in evidencias_regex.get("emails", [])
+    }
+    cpfs_regex = {
+        normalizar_digitos(cpf)
+        for cpf in evidencias_regex.get("cpfs_validos", [])
+    }
+    itens_filtrados = []
+    for item in relatorio.itens:
+        tipo = item.tipo.casefold()
+
+        if "email" in tipo or "e-mail" in tipo:
+            if item.dado.strip().casefold() not in emails_regex:
+                continue
+        if "cpf" in tipo:
+            if normalizar_digitos(item.dado) not in cpfs_regex:
+                continue
+        itens_filtrados.append(item)
+
+    return Relatorio(itens=itens_filtrados)
