@@ -1,10 +1,11 @@
-import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
+
 from identificador import identificar_arquivo
 from ocr import extrair_texto
 from regex_parser import extrair_evidencias
+from presidio_detector import analisar_texto
 
 """Input"""
 
@@ -67,7 +68,9 @@ def processamento(caminho):
 
     try:
         evidencias_regex = extrair_evidencias(texto)
-        relatorio = identificar_dados_sensiveis(texto, evidencias_regex)
+        resultados_presidio = analisar_texto(texto)
+
+        relatorio = identificar_dados_sensiveis(texto, evidencias_regex, resultados_presidio, )
 
         resultado_ia = "\n Informacoes sensiveis encontradas \n"
 
@@ -80,9 +83,23 @@ def processamento(caminho):
                     f"Tipo: {item.tipo}\n"
                     f"Risco: {item.risco.upper()}\n"
                 )
+
+        if resultados_presidio:
+            resultado_ia += "\n\nEncontrados pelo Microsoft Presidio:\n"
+            for resultado in resultados_presidio:
+                valor = texto[resultado.start:resultado.end]
+                resultado_ia += (
+                    f"\nDado: {valor}\n"
+                    f"Tipo: {resultado.entity_type}\n"
+                    f"Score: {resultado.score:.2f}\n"
+                )
+        else:
+            resultado_ia += "\n\nO Presidio não encontrou dados reconhecidos."
+
         atualizar_tela(info_arquivo + "\n" + resultado_ia)
 
     except Exception as erro:
+        print(f"[ERRO OPENROUTER] {type(erro).__name__}: {erro}")
         atualizar_tela(
             info_arquivo +
             "\n\n[ERRO NA ANÁLISE COM OPENROUTER]\n"

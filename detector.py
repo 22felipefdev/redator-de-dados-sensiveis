@@ -1,13 +1,12 @@
 import os
 import json
-import unicodedata
 from typing import List
 from dotenv import load_dotenv
 import httpx
 import instructor
 from openai import OpenAI
 from pydantic import BaseModel, Field
-from regex_parser import extrair_evidencias, normalizar_digitos
+from regex_parser import *
 
 load_dotenv(override=True)
 
@@ -22,11 +21,76 @@ class Relatorio(BaseModel):
     itens: List[ItemSensivel]
 
 
-def identificar_dados_sensiveis(texto: str, evidencias_regex=None) -> Relatorio:
-    api_key = os.getenv("OPENROUTER_API_KEY").strip()
+def cruzar_evidencias(texto, evidencias_regex, resultados_presidio):
+    configuracao = {
+        "EMAIL_ADDRESS": ("emails", lambda v: v.strip().casefold()),
+        "BR_CPF": ("cpfs_validos", normalizar_digitos),
+        "BR_CNPJ": ("cnpjs_validos", normalizar_cnpj),
+        "BR_RG": ("rgs_rotulados", normalizar_codigo),
+        "BR_CARTAO": ("cartoes_credito_validados", normalizar_digitos),
+        "BR_NUMERO_OFICIO": (
+            "numeros_de_oficio",
+            lambda v: v.strip().casefold(),
+        ),
+    }
+    encontrados_presidio = {}
+    for resultado in resultados_presidio:
+        if resultado.entity_type not in configuracao:
+            continue
 
+        trecho = texto[resultado.start:resultado.end]
+
+        if resultado.entity_type == "BR_RG":
+            correspondencia = PADRAO_RG.search(trecho)
+            if correspondencia:
+                trecho = correspondencia.group(1)
+
+        elif resultado.entity_type == "BR_NUMERO_OFICIO":
+            correspondencia = PADRAO_OFICIO.search(trecho)
+            if correspondencia:
+                trecho = correspondencia.group(1)
+
+        _, normalizar = configuracao[resultado.entity_type]
+        encontrados_presidio.setdefault(
+            resultado.entity_type, set()
+        ).add(normalizar(trecho)
+              )
+    confirmadas = {}
+
+    for entidade, (chave_regex, normalizar) in configuracao.items():
+        valores_presidio = encontrados_presidio.get(entidade, set())
+
+        confirmadas[chave_regex] = [
+            valor
+            for valor in evidencias_regex.get(chave_regex, [])
+            if normalizar(valor) in valores_presidio
+        ]
+
+    return confirmadas
+
+
+def identificar_dados_sensiveis(
+        texto: str,
+        evidencias_regex=None,
+        resultados_presidio=None,
+) -> Relatorio:
     if evidencias_regex is None:
         evidencias_regex = extrair_evidencias(texto)
+
+    if resultados_presidio is None:
+        resultados_presidio = []
+
+    evidencias_confirmadas = cruzar_evidencias(
+        texto,
+        evidencias_regex,
+        resultados_presidio,
+    )
+
+    if not any(evidencias_confirmadas.values()):
+        return Relatorio(itens=[])
+    api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY não foi encontrada.")
 
     client = instructor.from_openai(
         OpenAI(
@@ -39,7 +103,7 @@ def identificar_dados_sensiveis(texto: str, evidencias_regex=None) -> Relatorio:
 
     relatorio = client.chat.completions.create(
         Relatorio,
-        model="cohere/north-mini-code:free",
+        model="nvidia/nemotron-3-ultra-550b-a55b:free",
         messages=[
             {
                 "role": "system",
@@ -79,30 +143,11 @@ def identificar_dados_sensiveis(texto: str, evidencias_regex=None) -> Relatorio:
                 )
             },
             {"role": "user", "content": (
-                f"Evidências extraídas e validadas por regras: {json.dumps(evidencias_regex, ensure_ascii=False)}\n\n"
-                f"Texto do documento:\n{texto}"
+                "Analise somente estes dados confirmados pelos dois detectores. "
+                "Não invente nem acrescente valores:\n"
+                f"{json.dumps(evidencias_confirmadas, ensure_ascii=False)}"
             )}
         ],
         temperature=0.0
     )
-    emails_regex = {
-        email.strip().casefold()
-        for email in evidencias_regex.get("emails", [])
-    }
-    cpfs_regex = {
-        normalizar_digitos(cpf)
-        for cpf in evidencias_regex.get("cpfs_validos", [])
-    }
-    itens_filtrados = []
-    for item in relatorio.itens:
-        tipo = item.tipo.casefold()
-
-        if "email" in tipo or "e-mail" in tipo:
-            if item.dado.strip().casefold() not in emails_regex:
-                continue
-        if "cpf" in tipo:
-            if normalizar_digitos(item.dado) not in cpfs_regex:
-                continue
-        itens_filtrados.append(item)
-
-    return Relatorio(itens=itens_filtrados)
+    return relatorio
