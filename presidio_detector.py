@@ -78,7 +78,7 @@ reconhecedor_cartao = PatternRecognizer(
         Pattern(
             name="cartao",
             regex=PADRAO_CARTAO.pattern,
-            score=1,
+            score=0.3,
         )
     ],
     context=[

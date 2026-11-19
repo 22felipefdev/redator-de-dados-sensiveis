@@ -4,6 +4,15 @@ PADRAO_EMAIL = re.compile(
     r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])",
     re.IGNORECASE,
 )
+PADRAO_EMAIL_ROTULADO = re.compile(
+    r"\b(?:e-?mail|correio\s+eletr[oô]nico)\b[ \t]*:?[ \t]*([^\r\n]{5,80})",
+    re.IGNORECASE,
+)
+PADRAO_EMAIL_RUIDOSO = re.compile(
+    r"(?<![\w.+-])([A-Z0-9._%+-]+)(?:\((?:D|a)\)?|[©®])"
+    r"([A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,})(?![\w.-])",
+    re.IGNORECASE,
+)
 PADRAO_CPF = re.compile(
     r"(?<![0-9])(?:[0-9]{11}|[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2})(?![0-9])"
 )
@@ -20,7 +29,9 @@ PADRAO_RG = re.compile(
     r"([A-Z0-9][A-Z0-9./\-]{4,19})(?![A-Z0-9])"
 )
 PADRAO_CARTAO = re.compile(
-    r"(?<![0-9])(?:[0-9][ \t.-]?){12,18}[0-9](?![0-9])"
+    r"(?<![0-9])(?<![0-9][ \t.\-/])"
+    r"(?:[0-9][ \t.-]?){11,18}[0-9]"
+    r"(?![0-9])(?![ \t.\-/][0-9])"
 )
 CONTEXTO_CARTAO = re.compile(
     r"cart[aã]o|visa|master\s*card|mastercard|elo|amex|american\s+express",
@@ -34,7 +45,11 @@ PADRAO_OFICIO = re.compile(
     r"([A-Z0-9][A-Z0-9./\-]{1,30})",
     re.IGNORECASE,
 )
-
+_SEP = r"[ \t.\-/]{0,3}"
+PADRAO_CNPJ_RUIDOSO = re.compile(
+    rf"(?<![0-9A-Z])(?<![0-9][ \t.\-/])(?:[0-9]{_SEP}){{13}}[0-9](?![0-9A-Z])(?!{_SEP}[0-9])",
+    re.IGNORECASE,
+)
 
 def normalizar_digitos(valor: str) -> str:
     return re.sub(r"[^0-9]", "", valor)
@@ -55,7 +70,6 @@ def calcular_digito_cnpj(base: str, pesos: tuple[int, ...]) -> str:
     )
     resto = soma % 11
     return "0" if resto < 2 else str(11 - resto)
-
 
 def validar_cnpj(valor: str) -> bool:
     cnpj = normalizar_cnpj(valor)
@@ -98,7 +112,7 @@ def validar_cpf(valor: str) -> bool:
 def validar_luhn(numeros: str) -> bool:
     digitos = normalizar_digitos(numeros)
 
-    if not 13 <= len(digitos) <= 19 or len(set(digitos)) == 1:
+    if not 12 <= len(digitos) <= 19 or len(set(digitos)) == 1:
         return False
     soma = 0
     for posicao, caractere in enumerate(reversed(digitos)):
@@ -111,6 +125,23 @@ def validar_luhn(numeros: str) -> bool:
         soma += digito
     return soma % 10 == 0
 
+def extrair_emails_provaveis(texto: str) -> list[dict]:
+    """E-mails sem '@' legível. 'valor_ocr' é EXATAMENTE o que o OCR leu."""
+    achados = []
+    for m in PADRAO_EMAIL_ROTULADO.finditer(texto):
+        bruto = m.group(1)
+        valor = bruto.strip()
+        if "@" in valor or not re.search(r"\.[A-Za-z]{2,}$", valor):
+            continue
+        achados.append({
+            "tipo": "EMAIL",
+            "valor_ocr": valor,
+            "inicio": m.start(1),
+            "fim": m.start(1) + len(bruto.rstrip()),
+            "confianca": "baixa",
+            "revisar": True,
+        })
+    return achados
 
 def extrair_rgs_rotulados(texto: str) -> list[str]:
     candidatos = PADRAO_RG.findall(texto)
@@ -127,15 +158,20 @@ def extrair_cpfs_validos(texto: str) -> list[str]:
 
 def extrair_cnpjs_validos(texto: str) -> list[str]:
     candidatos = PADRAO_CNPJ.findall(texto)
-
+    candidatos += [m.group(0) for m in PADRAO_CNPJ.finditer(texto)]
     return list(dict.fromkeys(
-        cnpj for cnpj in candidatos if validar_cnpj(cnpj)
+        c for c in candidatos if validar_cnpj(c)
     ))
 
 
 def extrair_emails(texto: str) -> list[str]:
     return list(dict.fromkeys(PADRAO_EMAIL.findall(texto)))
 
+def extrair_emails_reparados(texto: str) -> list[dict]:
+    return [
+        {"original": m.group(0), "valor": f"{m.group(1)}@{m.group(2)}", "revisar": True}
+        for m in PADRAO_EMAIL_RUIDOSO.finditer(texto)
+    ]
 
 def extrair_numeros_oficio(texto: str) -> list[str]:
     numeros = PADRAO_OFICIO.findall(texto)
