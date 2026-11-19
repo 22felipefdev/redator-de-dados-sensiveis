@@ -19,3 +19,9 @@ def extrair_evidencias(texto: str):
         "cnpjs_validos": [],
         "rgs_rotulados": [],
     }
+
+def normalizar_digitos(valor: str) -> str:
+    """Remove caracteres não numéricos de uma string."""
+    if not valor:
+        return ""
+    return re.sub(r"\D+", "", str(valor))
