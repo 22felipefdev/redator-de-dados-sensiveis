@@ -6,6 +6,7 @@ from identificador import identificar_arquivo
 from ocr import extrair_texto
 from regex_parser import extrair_evidencias
 from presidio_detector import analisar_texto
+from detector import identificar_dados_sensiveis
 
 """Input"""
 
@@ -47,65 +48,36 @@ def processamento(caminho):
         )
         restaurar_botoes()
         return
-    # A análise com IA é opcional: falhas de dependências ou da API não devem
-    # impedir que o OCR extraia o texto do documento.
-    try:
-        from detector import identificar_dados_sensiveis
-    except ModuleNotFoundError as erro:
-        atualizar_tela(
-            info_arquivo
-            + "\n\n[OCR CONCLUÍDO — IA NÃO DISPONÍVEL]\n"
-            + f"Falta instalar a dependência '{erro.name}' para análise com OpenRouter.\n"
-            + "No terminal do ambiente Python do projeto, execute: "
-            + "python -m pip install openai instructor httpx\n"
-            + "O texto extraído está abaixo:\n\n"
-            + texto
-        )
-        restaurar_botoes()
-        return
-
-    atualizar_tela("\n[IA] Analisando dados sensíveis via OpenRouter...\n")
+    atualizar_tela("\n[ANÁLISE] Cruzando evidências...\n")
 
     try:
         evidencias_regex = extrair_evidencias(texto)
         resultados_presidio = analisar_texto(texto)
 
-        relatorio = identificar_dados_sensiveis(texto, evidencias_regex, resultados_presidio, )
+        relatorio = identificar_dados_sensiveis(
+            texto, evidencias_regex, resultados_presidio
+        )
 
-        resultado_ia = "\n Informacoes sensiveis encontradas \n"
+        resultado = "\n Informações sensíveis encontradas \n"
 
         if not relatorio.itens:
-            resultado_ia += "\nNenhum dado sensível foi encontrado no arquivo."
+            resultado += "\nNenhum dado sensível foi encontrado no arquivo."
         else:
             for item in relatorio.itens:
-                resultado_ia += (
+                resultado += (
                     f"\nDado sensível: {item.dado}\n"
                     f"Tipo: {item.tipo}\n"
                     f"Risco: {item.risco.upper()}\n"
                     f"Revisar: {'SIM' if item.revisar else 'nao'}\n"
                 )
 
-        if resultados_presidio:
-            resultado_ia += "\n\nEncontrados pelo Microsoft Presidio:\n"
-            for resultado in resultados_presidio:
-                valor = texto[resultado.start:resultado.end]
-                resultado_ia += (
-                    f"\nDado: {valor}\n"
-                    f"Tipo: {resultado.entity_type}\n"
-                    f"Score: {resultado.score:.2f}\n"
-                )
-        else:
-            resultado_ia += "\n\nO Presidio não encontrou dados reconhecidos."
-
-        atualizar_tela(info_arquivo + "\n" + resultado_ia)
+        atualizar_tela(info_arquivo + "\n" + resultado)
 
     except Exception as erro:
-        print(f"[ERRO OPENROUTER] {type(erro).__name__}: {erro}")
+        print(f"[ERRO NA ANÁLISE] {type(erro).__name__}: {erro}")
         atualizar_tela(
             info_arquivo +
-            "\n\n[ERRO NA ANÁLISE COM OPENROUTER]\n"
-            "Confira se OPENROUTER_API_KEY está configurada, se há conexão com a internet "
-            "e se o modelo gratuito está disponível e dentro do limite de uso.\n"
+            "\n\n[ERRO NA ANÁLISE]\n"
             f"Detalhe técnico: {type(erro).__name__}: {erro}"
         )
     restaurar_botoes()

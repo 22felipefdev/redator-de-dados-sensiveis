@@ -1,16 +1,19 @@
-BIBLIOTECAS USADAS NO SCANNER (detector.py):
+BIBLIOTECAS USADAS NO SCANNER:
 
-pydantic - Estrutura os tipos (ItemSensivel e Relatorio) e valida os dados retornados.
-instructor - Garante que o modelo local retorne respostas estritamente estruturadas para o pydantic.
-openai - Biblioteca base do instructor para as chamadas do modelo.
-httpx - Cliente HTTP pra fazer as conexoes diretas ignorando interferencia de proxy do Windows.
-pdfplumber - Leitura e extracao de pdf para analise.
+presidio-analyzer - Detecta CPF, CNPJ, RG, cartão, e-mail e número de ofício por padrões e contexto.
+spacy - Fornece o modelo de linguagem português usado pelo Presidio (pt_core_news_sm).
+pdfplumber - Leitura e extração de PDF para análise.
 pytesseract - Integra o Python ao mecanismo Tesseract para OCR de PDFs digitalizados e imagens.
 Pillow - Abre/prepara imagens e permite renderizar páginas do PDF para OCR.
-reportlab (opcional) - Gera relatorio em PDF com dados falsos para testar analise.
+reportlab (opcional) - Gera relatório em PDF com dados falsos para testar análise.
 
-Comando para instalar todas as bibliotecas:
-python -m pip install pydantic instructor openai httpx pdfplumber pytesseract Pillow reportlab
+O scanner não usa mais modelo de linguagem externo: não precisa de OPENROUTER_API_KEY,
+internet, openai, instructor, httpx, dotenv nem pydantic. O relatório é montado
+deterministicamente a partir da interseção regex + Presidio.
+
+Comando para instalar as bibliotecas necessárias:
+python -m pip install presidio-analyzer spacy pdfplumber pytesseract Pillow
+python -m spacy download pt_core_news_sm
 
 IMPORTANTE: pytesseract é apenas a ponte Python. Também instale o Tesseract OCR para Windows,
 incluindo o idioma português (por). Se o executável não estiver no PATH, configure TESSERACT_CMD

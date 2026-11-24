@@ -1,0 +1,11 @@
+.git
+.idea
+.venv
+__pycache__
+*.pyc
+eval/corpus
+*.ocr-*.txt
+*.pdf
+*.png
+*.jpg
+*.jpeg

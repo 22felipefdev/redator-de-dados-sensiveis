@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+presidio-analyzer==2.2.366
+spacy==3.8.18
+pytesseract==0.3.13
+Pillow==13.0.0
+pdfplumber==0.11.10
