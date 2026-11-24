@@ -82,6 +82,7 @@ def processamento(caminho):
                     f"\nDado sensível: {item.dado}\n"
                     f"Tipo: {item.tipo}\n"
                     f"Risco: {item.risco.upper()}\n"
+                    f"Revisar: {'SIM' if item.revisar else 'nao'}\n"
                 )
 
         if resultados_presidio:

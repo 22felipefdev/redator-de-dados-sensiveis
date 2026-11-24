@@ -1,3 +1,5 @@
+import re
+
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 
@@ -52,7 +54,12 @@ reconhecedor_cnpj = PatternRecognizer(
             name="cnpj",
             regex=PADRAO_CNPJ.pattern,
             score=0.5,
-        )
+        ),
+        Pattern(
+            name="cnpj_ruidoso",
+            regex=PADRAO_CNPJ_RUIDOSO.pattern,
+            score=0.5,
+        ),
     ],
     context=["cnpj", "empresa", "empresarial", "juridica", "jurídica", "inscricao", "inscrição"],
 )
@@ -104,6 +111,14 @@ reconhecedor_oficio = PatternRecognizer(
 analisador.registry.add_recognizer(reconhecedor_oficio)
 
 
+# Rótulos de telefone na mesma linha: um número com DDD também pode passar no
+# Luhn quando tem 13 dígitos, então a validação matemática sozinha não basta.
+ROTULO_TELEFONE = re.compile(
+    r"telefone|telefonia|celular|fone|phone|whatsapp|\btel\b",
+    re.IGNORECASE,
+)
+
+
 def analisar_texto(texto: str):
     resultados = analisador.analyze(
         text=texto,
@@ -128,8 +143,12 @@ def analisar_texto(texto: str):
         if resultado.entity_type == "BR_CNPJ" and not validar_cnpj(trecho):
             continue
 
-        if resultado.entity_type == "BR_CARTAO" and not validar_luhn(trecho):
-            continue
+        if resultado.entity_type == "BR_CARTAO":
+            inicio_linha = texto.rfind("\n", 0, resultado.start) + 1
+            if ROTULO_TELEFONE.search(texto[inicio_linha:resultado.start]):
+                continue
+            if not validar_luhn(trecho):
+                continue
 
         resultados_validos.append(resultado)
 

@@ -8,8 +8,13 @@ PADRAO_EMAIL_ROTULADO = re.compile(
     r"\b(?:e-?mail|correio\s+eletr[oô]nico)\b[ \t]*:?[ \t]*([^\r\n]{5,80})",
     re.IGNORECASE,
 )
+# O OCR troca '@' por '(D', '(dD', 'D', 'Q', '©', entre outros. O escopo
+# (?-i:...) impede que IGNORECASE transforme qualquer letra em artefato, e o
+# lookbehind evita que a última letra do local seja engolida (xnovaisQD...).
 PADRAO_EMAIL_RUIDOSO = re.compile(
-    r"(?<![\w.+-])([A-Z0-9._%+-]+)(?:\((?:D|a)\)?|[©®])"
+    r"(?<![\w.+-])([A-Z0-9._%+-]+)(?<![DQd])"
+    r"[ \t]*(?:\([ \t]*(?:D|a){1,2}[ \t]*\)?"
+    r"|(?-i:QD|DQ|[DQd]{1,2})|[©®])[ \t]*"
     r"([A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,})(?![\w.-])",
     re.IGNORECASE,
 )
@@ -59,8 +64,15 @@ def normalizar_codigo(valor: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", valor.upper())
 
 
+_MAPA_OCR_CNPJ = str.maketrans({
+    "O": "0", "Q": "0", "D": "0",
+    "I": "1", "L": "1",
+    "Z": "2", "A": "4", "S": "5", "G": "6", "B": "8",
+})
+
 def normalizar_cnpj(valor: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "", valor.upper())
+    """Normaliza e converte confusões comuns de OCR antes do dígito verificador."""
+    return re.sub(r"[^A-Z0-9]", "", valor.upper()).translate(_MAPA_OCR_CNPJ)
 
 
 def calcular_digito_cnpj(base: str, pesos: tuple[int, ...]) -> str:
@@ -74,7 +86,7 @@ def calcular_digito_cnpj(base: str, pesos: tuple[int, ...]) -> str:
 def validar_cnpj(valor: str) -> bool:
     cnpj = normalizar_cnpj(valor)
 
-    if len(cnpj) != 14 or len(set(cnpj)) == 1:
+    if len(cnpj) != 14 or not cnpj.isdigit() or len(set(cnpj)) == 1:
         return False
 
     pesos_primeiro_digito = (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
@@ -112,6 +124,9 @@ def validar_cpf(valor: str) -> bool:
 def validar_luhn(numeros: str) -> bool:
     digitos = normalizar_digitos(numeros)
 
+    # O corpus tem cartões de 12 dígitos, então não dá para subir o mínimo.
+    # Telefones com DDD (ex.: '+55 67 1607-3375') também passam no Luhn: quem
+    # resolve esse caso é o filtro de rótulo no presidio_detector.py.
     if not 12 <= len(digitos) <= 19 or len(set(digitos)) == 1:
         return False
     soma = 0
@@ -157,10 +172,13 @@ def extrair_cpfs_validos(texto: str) -> list[str]:
 
 
 def extrair_cnpjs_validos(texto: str) -> list[str]:
-    candidatos = PADRAO_CNPJ.findall(texto)
-    candidatos += [m.group(0) for m in PADRAO_CNPJ.finditer(texto)]
+    candidatos = [
+        m.group(0)
+        for padrao in (PADRAO_CNPJ, PADRAO_CNPJ_RUIDOSO)
+        for m in padrao.finditer(texto)
+    ]
     return list(dict.fromkeys(
-        c for c in candidatos if validar_cnpj(c)
+        normalizar_cnpj(c) for c in candidatos if validar_cnpj(c)
     ))
 
 
@@ -168,10 +186,15 @@ def extrair_emails(texto: str) -> list[str]:
     return list(dict.fromkeys(PADRAO_EMAIL.findall(texto)))
 
 def extrair_emails_reparados(texto: str) -> list[dict]:
-    return [
-        {"original": m.group(0), "valor": f"{m.group(1)}@{m.group(2)}", "revisar": True}
-        for m in PADRAO_EMAIL_RUIDOSO.finditer(texto)
-    ]
+    achados = []
+    for m in PADRAO_EMAIL_RUIDOSO.finditer(texto):
+        dominio = m.group(2)
+        achados.append({
+            "original": m.group(0),
+            "valor": f"{m.group(1)}@{dominio}",
+            "revisar": True,
+        })
+    return achados
 
 def extrair_numeros_oficio(texto: str) -> list[str]:
     numeros = PADRAO_OFICIO.findall(texto)
@@ -194,9 +217,19 @@ def extrair_cartoes_validos(texto: str) -> list[str]:
     return list(dict.fromkeys(cartoes))
 
 
+def remover_colisoes(confirmados: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Um mesmo número não pode ser CNPJ e cartão ao mesmo tempo."""
+    cnpjs = {valor for tipo, valor in confirmados if tipo == "CNPJ"}
+    return {
+        item for item in confirmados
+        if not (item[0] == "CARTAO" and item[1] in cnpjs)
+    }
+
+
 def extrair_evidencias(texto: str):
     return {
         "emails": extrair_emails(texto),
+        "emails_reparados": extrair_emails_reparados(texto),
         "cartoes_credito_validados": extrair_cartoes_validos(texto),
         "numeros_de_oficio": extrair_numeros_oficio(texto),
         "cpfs_validos": extrair_cpfs_validos(texto),

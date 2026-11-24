@@ -15,6 +15,7 @@ class ItemSensivel(BaseModel):
     dado: str = Field(..., description="O dado sensível detectado")
     tipo: str = Field(..., description="O tipo do dado sensível (ex: CPF, cartão de crédito, etc.)")
     risco: str = Field(..., description="Baixo, medio ou alto)")
+    revisar: bool = Field(False, description="Valor reconstruído do OCR, requer conferência")
 
 
 class Relatorio(BaseModel):
@@ -65,6 +66,18 @@ def cruzar_evidencias(texto, evidencias_regex, resultados_presidio):
             for valor in evidencias_regex.get(chave_regex, [])
             if normalizar(valor) in valores_presidio
         ]
+
+    cnpjs = {normalizar_cnpj(v) for v in confirmadas.get("cnpjs_validos", [])}
+    confirmadas["cartoes_credito_validados"] = [
+        valor for valor in confirmadas.get("cartoes_credito_validados", [])
+        if normalizar_digitos(valor) not in cnpjs
+    ]
+    # E-mails reparados não têm '@' no OCR: não dependem do Presidio.
+    confirmadas["emails_reparados"] = [
+        email["valor"]
+        for email in evidencias_regex.get("emails_reparados", [])
+        if email.get("revisar", True)
+    ]
 
     return confirmadas
 
@@ -131,6 +144,8 @@ def identificar_dados_sensiveis(
                     "VALIDATION RULES:\n"
                     "- Classify a value as CPF only if it appears in 'cpfs_validos' in the validated evidence.\n"
                     "- Classify a value as a credit card only if it appears in 'cartoes_credito_validados'.\n"
+                    "- Values in 'emails_reparados' were rebuilt because the OCR did not read the '@'. "\
+                    "Report them with 'revisar' set to true; never present them as literal/confirmed values.\n"
                     "- Never classify case/process, official-letter, protocol, expediente, enrollment, or "
                     "document-registration numbers as credit cards.\n"
                     "- Do not infer that a number is valid merely because it passes a visual format check.\n\n"
@@ -138,7 +153,8 @@ def identificar_dados_sensiveis(
                     "OUTPUT:\n"
                     "Follow the Pydantic schema provided by the application. Return a 'Relatorio' object "
                     "containing an 'itens' list. Each item must have 'dado' (the exact value), "
-                    "'tipo' (the data type), and 'risco' ('baixo', 'medio', or 'alto'). "
+                    "'tipo' (the data type), 'risco' ('baixo', 'medio', or 'alto') and "
+                    "'revisar' (true only for values coming from 'emails_reparados'). "
                     "If no data can be confirmed, return an empty 'itens' list. Do not add text outside the structured result."
                 )
             },
@@ -150,4 +166,15 @@ def identificar_dados_sensiveis(
         ],
         temperature=0.0
     )
+
+    # A IA pode esquecer o sinalizador: garanta a revisão de todo valor que
+    # veio de reparo do '@', mesmo que ela tenha corrigido algum caractere.
+    reparados = {
+        valor.strip().casefold()
+        for valor in evidencias_confirmadas.get("emails_reparados", [])
+    }
+    for item in relatorio.itens:
+        if item.dado.strip().casefold() in reparados:
+            item.revisar = True
+
     return relatorio
