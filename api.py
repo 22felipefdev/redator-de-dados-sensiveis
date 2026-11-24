@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from detector import identificar_dados_sensiveis
 from ocr import EXTENSOES_IMAGEM, EXTENSOES_TEXTO, extrair_texto
+from ocr_posicoes import obter_posicoes
 from presidio_detector import analisar_texto
 from regex_parser import extrair_evidencias
 
@@ -51,6 +52,7 @@ def analisar(arquivo: UploadFile = File(...)):
             caminho = Path(temporario) / f"entrada{extensao}"
             caminho.write_bytes(conteudo)
             texto = extrair_texto(caminho)
+            posicoes = obter_posicoes(caminho) if extensao in EXTENSOES_IMAGEM else None
     except ValueError as erro:
         raise HTTPException(400, str(erro)) from erro
     except Exception as erro:
@@ -63,6 +65,7 @@ def analisar(arquivo: UploadFile = File(...)):
     return {
         "arquivo": nome,
         "texto": texto,
+        "posicoes": posicoes,
         "itens": [
             {
                 "dado": item.dado,
