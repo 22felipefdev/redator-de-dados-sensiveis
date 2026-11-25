@@ -1,0 +1,209 @@
+r"""Gate único de verificação: testes, sintaxe, baseline, front e vulnerabilidades.
+
+Uso:
+    python ci/verificar.py --docker --web <pasta-do-front> --exigir-baseline
+    python ci/verificar.py                         # no CI, com FastAPI instalado
+
+Use --docker quando o Python local não tiver FastAPI e os testes rodarem no
+container da API.
+
+O corpus é dado do cliente e não é versionado. Sem ele o baseline é avisado e
+pulado; use --exigir-baseline quando o corpus estiver disponível no runner.
+"""
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+# No Windows o console padrão é cp1252 e não imprime ✓ do npm.
+for fluxo in (sys.stdout, sys.stderr):
+    if hasattr(fluxo, "reconfigure"):
+        fluxo.reconfigure(encoding="utf-8", errors="replace")
+
+RAIZ = Path(__file__).resolve().parent.parent
+CORPUS = RAIZ / "eval" / "corpus"
+
+RECALL_MINIMO = 99
+FP_MAXIMO = 2
+PADRAO_TOTAL = re.compile(
+    r"TOTAL\s+(\d+)%\s+(\d+)%\s+(\d+)\s+(\d+)%\s+(\d+)\s+(\d+)%\s+(\d+)"
+)
+
+
+def executar(comando, diretorio, nome, env=None):
+    """Executa um comando e falha o gate se ele retornar diferente de zero."""
+    print(f"\n== {nome} ==")
+    visivel = " ".join(str(parte) for parte in comando)
+    print(visivel)
+    resultado = subprocess.run(
+        comando,
+        cwd=diretorio,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
+    if resultado.stdout.strip():
+        print(resultado.stdout.strip())
+    if resultado.returncode != 0:
+        if resultado.stderr.strip():
+            print(resultado.stderr.strip(), file=sys.stderr)
+        raise SystemExit(f"FALHOU: {nome}")
+    return resultado.stdout
+
+
+def python_padrao():
+    virtual = RAIZ / ".venv"
+    if os.name == "nt":
+        candidato = virtual / "Scripts" / "python.exe"
+    else:
+        candidato = virtual / "bin" / "python"
+    return str(candidato) if candidato.exists() else sys.executable
+
+
+def verificar_python(python, container=None):
+    arquivos = [
+        "api.py",
+        "detector.py",
+        "ocr.py",
+        "ocr_posicoes.py",
+        "presidio_detector.py",
+        "regex_parser.py",
+        "test_api.py",
+        "ci/verificar.py",
+        "ci/test_verificar.py",
+    ]
+    executar([python, "-m", "py_compile", *arquivos], RAIZ, "sintaxe Python")
+    executar(
+        [python, "-m", "unittest", "-v", "ci.test_verificar"],
+        RAIZ,
+        "testes do gate",
+    )
+
+    if container:
+        comando_testes = [
+            "docker",
+            "exec",
+            "-i",
+            container,
+            "python",
+            "-m",
+            "unittest",
+            "-v",
+            "test_api",
+        ]
+    else:
+        comando_testes = [python, "-m", "unittest", "-v", "test_api"]
+    executar(comando_testes, RAIZ, "testes da API")
+
+
+def verificar_baseline(python, exigir):
+    if not CORPUS.is_dir():
+        aviso = "baseline ignorado: eval/corpus não está disponível"
+        if exigir:
+            raise SystemExit(f"FALHOU: {aviso}")
+        print(f"\nAVISO: {aviso}")
+        return
+
+    ambiente = os.environ.copy()
+    ambiente.setdefault(
+        "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    )
+    saida = executar(
+        [python, "eval/baseline.py"], RAIZ, "baseline de recall", ambiente
+    )
+    encontrado = PADRAO_TOTAL.search(saida)
+    if not encontrado:
+        raise SystemExit("FALHOU: não foi possível ler a linha TOTAL do baseline")
+
+    recall = int(encontrado.group(6))
+    falsos_positivos = int(encontrado.group(7))
+    print(f"\nsistema: recall={recall}% fp={falsos_positivos}")
+    if recall < RECALL_MINIMO:
+        raise SystemExit(
+            f"FALHOU: recall {recall}% abaixo de {RECALL_MINIMO}%"
+        )
+    if falsos_positivos > FP_MAXIMO:
+        raise SystemExit(
+            f"FALHOU: {falsos_positivos} falsos positivos acima de {FP_MAXIMO}"
+        )
+
+
+def verificar_front(web):
+    if not web:
+        print("\nAVISO: front ignorado (use --web ou WEB_DIR)")
+        return
+    diretorio = Path(web).resolve()
+    if not (diretorio / "package.json").is_file():
+        raise SystemExit(f"FALHOU: package.json não encontrado em {diretorio}")
+    npm = shutil.which("npm")
+    if not npm:
+        raise SystemExit("FALHOU: npm não encontrado no PATH")
+    executar([npm, "run", "build"], diretorio, "build do front")
+    executar([npm, "run", "lint"], diretorio, "lint do front")
+
+
+def verificar_vulnerabilidades():
+    pip_audit = shutil.which("pip-audit")
+    if pip_audit:
+        executar(
+            [pip_audit, "-r", "requirements.txt"], RAIZ, "pip-audit"
+        )
+    else:
+        print("\nAVISO: pip-audit não instalado (instale no CI)")
+
+    trivy = shutil.which("trivy")
+    if not trivy:
+        print("AVISO: trivy CLI não instalado (use a action no CI)")
+        return
+    docker = shutil.which("docker")
+    if not docker:
+        print("AVISO: docker não encontrado; trivy ignorado")
+        return
+    inspecao = subprocess.run(
+        [docker, "image", "inspect", "redator-api:latest"],
+        capture_output=True,
+    )
+    if inspecao.returncode != 0:
+        print("AVISO: imagem redator-api:latest não existe; trivy ignorado")
+        return
+    executar(
+        [
+            trivy,
+            "image",
+            "--exit-code",
+            "1",
+            "--severity",
+            "HIGH,CRITICAL",
+            "redator-api:latest",
+        ],
+        RAIZ,
+        "trivy (HIGH/CRITICAL)",
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--web", default=os.getenv("WEB_DIR"))
+    parser.add_argument("--python", default=python_padrao())
+    parser.add_argument("--exigir-baseline", action="store_true")
+    parser.add_argument(
+        "--container",
+        default=os.getenv("API_CONTAINER"),
+        help="Nome do container da API para rodar os testes (ex.: redator-api-1)",
+    )
+    argumentos = parser.parse_args()
+
+    verificar_python(argumentos.python, argumentos.container)
+    verificar_baseline(argumentos.python, argumentos.exigir_baseline)
+    verificar_front(argumentos.web)
+    verificar_vulnerabilidades()
+    print("\nTODAS AS VERIFICAÇÕES PASSARAM")
+
+
+if __name__ == "__main__":
+    main()
