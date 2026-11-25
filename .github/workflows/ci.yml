@@ -22,6 +22,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Instalar Tesseract para os testes de OCR
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por
+
       - name: Instalar dependências com hash
         run: |
           python -m pip install --upgrade pip
