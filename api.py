@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -46,6 +47,11 @@ app.add_middleware(
 EXTENSOES_ACEITAS = EXTENSOES_TEXTO | EXTENSOES_IMAGEM | {".pdf"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MiB
 CACHE_MAXIMO = 64  # entradas em memória; nada de PII gravado em disco
+
+# OCR/PDF são CPU-bound: sem limite, várias requisições competem e ficam todas lentas.
+OCR_CONCORRENCIA = max(1, int(os.getenv("OCR_CONCORRENCIA", "2")))
+FILA_ESPERA = max(0.0, float(os.getenv("FILA_ESPERA", "5")))
+_limite_ocr = threading.BoundedSemaphore(OCR_CONCORRENCIA)
 
 
 def _versao_ocr():
@@ -117,30 +123,42 @@ def analisar(arquivo: UploadFile = File(...)):
     if not conteudo or not assinatura_valida(conteudo, extensao):
         raise HTTPException(400, MENSAGEM_INVALIDO)
 
-    # Rotas síncronas rodam em thread pool: o OCR não bloqueia outras requests.
+    # Rotas síncronas rodam em thread pool: limitamos quantas fazem OCR/PDF ao mesmo tempo.
     inicio = time.perf_counter()
-    try:
-        if extensao in EXTENSOES_IMAGEM:
-            chave = _chave_cache(conteudo)
-            leitura = _cache.get(chave)
+    chave = _chave_cache(conteudo) if extensao in EXTENSOES_IMAGEM else None
+    leitura = _cache.get(chave) if chave else None
+
+    if leitura is None:
+        if not _limite_ocr.acquire(timeout=FILA_ESPERA):
+            raise HTTPException(
+                503,
+                "Servidor ocupado. Tente novamente em instantes.",
+                headers={"Retry-After": str(max(1, int(FILA_ESPERA)))},
+            )
+        try:
+            # Outra request pode ter preenchido o cache enquanto esperávamos na fila.
+            leitura = _cache.get(chave) if chave else None
             if leitura is None:
                 with tempfile.TemporaryDirectory() as temporario:
                     caminho = Path(temporario) / f"entrada{extensao}"
                     caminho.write_bytes(conteudo)
-                    leitura = analisar_imagem(caminho)
-                _cache[chave] = leitura
-                _cache.move_to_end(chave)
-                while len(_cache) > CACHE_MAXIMO:
-                    _cache.popitem(last=False)
-        else:
-            with tempfile.TemporaryDirectory() as temporario:
-                caminho = Path(temporario) / f"entrada{extensao}"
-                caminho.write_bytes(conteudo)
-                leitura = {"texto": extrair_texto(caminho), "posicoes": None}
-    except Exception:
-        # Detalhes ficam no servidor; o cliente não recebe caminhos nem versões.
-        logger.exception("Falha ao extrair texto de extensão %s", extensao)
-        raise HTTPException(500, "Não foi possível ler o arquivo.") from None
+                    if extensao in EXTENSOES_IMAGEM:
+                        leitura = analisar_imagem(caminho)
+                        _cache[chave] = leitura
+                        _cache.move_to_end(chave)
+                        while len(_cache) > CACHE_MAXIMO:
+                            _cache.popitem(last=False)
+                    else:
+                        leitura = {
+                            "texto": extrair_texto(caminho),
+                            "posicoes": None,
+                        }
+        except Exception:
+            # Detalhes ficam no servidor; o cliente não recebe caminhos nem versões.
+            logger.exception("Falha ao extrair texto de extensão %s", extensao)
+            raise HTTPException(500, "Não foi possível ler o arquivo.") from None
+        finally:
+            _limite_ocr.release()
 
     texto = leitura["texto"]
     posicoes = leitura["posicoes"]

@@ -135,6 +135,28 @@ class TesteAnalise(unittest.TestCase):
         self.assertEqual(resposta.status_code, 500)
         self.assertNotIn("imagem grande", resposta.text)
 
+    def test_fila_ocupada(self):
+        with patch.object(api._limite_ocr, "acquire", return_value=False):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={
+                    "arquivo": ("ocupado.txt", b"CPF: 123.456.789-09\n", "text/plain")
+                },
+            )
+        self.assertEqual(resposta.status_code, 503)
+        self.assertEqual(resposta.headers["Retry-After"], "5")
+
+    def test_semaphore_liberado_apos_falha(self):
+        api._cache.clear()
+        with patch.object(api, "analisar_imagem", side_effect=RuntimeError("falha")):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("falha.png", imagem_com_cpf(), "image/png")},
+            )
+        self.assertEqual(resposta.status_code, 500)
+        self.assertTrue(api._limite_ocr.acquire(blocking=False))
+        api._limite_ocr.release()
+
 
 if __name__ == "__main__":
     unittest.main()
