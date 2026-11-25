@@ -58,6 +58,20 @@ class TesteWorkflows(unittest.TestCase):
         self.assertEqual(builds[0]["with"]["context"], "./web")
         self.assertEqual(builds[0]["with"]["file"], "./web/Dockerfile.prod")
 
+    def test_release_publica_assets(self):
+        conteudo = (RAIZ / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        dados = yaml.safe_load(conteudo)
+        self.assertEqual(dados["jobs"]["publicar"]["needs"], ["api", "web"])
+        for asset in (
+            "sbom-api.spdx.json",
+            "image-digests.env",
+            "sbom-web.spdx.json",
+            "image-web.env",
+        ):
+            self.assertIn(asset, conteudo)
+
     def test_ci_inclui_front_local(self):
         caminho = RAIZ / ".github" / "workflows" / "ci.yml"
         dados = yaml.safe_load(caminho.read_text(encoding="utf-8"))

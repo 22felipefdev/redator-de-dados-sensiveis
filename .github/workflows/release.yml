@@ -173,3 +173,51 @@ jobs:
           path: |
             sbom-web.spdx.json
             image-web.env
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Baixar evidências
+        run: |
+          set -eu
+          gh run download "$GITHUB_RUN_ID" -n evidencias-api -D evidencias-api
+          gh run download "$GITHUB_RUN_ID" -n evidencias-web -D evidencias-web
+
+      - name: Criar ou atualizar o Release
+        run: |
+          set -eu
+          {
+            echo "Imagens publicadas no GHCR e assinadas com cosign keyless."
+            echo
+            echo '```'
+            cat evidencias-api/image-digests.env
+            cat evidencias-web/image-web.env
+            echo '```'
+            echo
+            echo "Os SBOMs SPDX em anexo também foram atestados no registro."
+          } > notas.md
+
+          ASSETS="
+            evidencias-api/sbom-api.spdx.json
+            evidencias-api/image-digests.env
+            evidencias-web/sbom-web.spdx.json
+            evidencias-web/image-web.env
+          "
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notas.md
+            # shellcheck disable=SC2086
+            gh release upload "$TAG" $ASSETS --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" --title "$TAG" --notes-file notas.md $ASSETS
+          fi
