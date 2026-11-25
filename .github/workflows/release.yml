@@ -29,26 +29,30 @@ jobs:
       IMAGEM: ghcr.io/${{ github.repository }}/api
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login no GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Instalar cosign
-        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          # Versão fixada e retries para quedas transitórias do CDN do GitHub.
+          cosign-release: v3.1.5
+          curl-retries: "6"
 
       - name: Construir e enviar API
         id: build
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
@@ -59,9 +63,9 @@ jobs:
             ${{ env.IMAGEM }}:latest
 
       - name: Gerar SBOM com Syft
-        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
-          image-ref: ${{ env.IMAGEM }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.IMAGEM }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom-api.spdx.json
           upload-artifact: false
@@ -87,7 +91,7 @@ jobs:
           printf 'IMAGEM_API=%s\n' "${ALVO}" > image-digests.env
 
       - name: Publicar evidências da API
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evidencias-api
           path: |
@@ -105,7 +109,7 @@ jobs:
       IMAGEM: ghcr.io/${{ github.repository }}/web
     steps:
       - name: Checkout do front
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.web_repo || vars.WEB_REPO }}
           token: ${{ secrets.WEB_REPO_TOKEN || github.token }}
@@ -113,21 +117,25 @@ jobs:
           persist-credentials: false
 
       - name: Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login no GHCR
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Instalar cosign
-        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          # Versão fixada e retries para quedas transitórias do CDN do GitHub.
+          cosign-release: v3.1.5
+          curl-retries: "6"
 
       - name: Construir e enviar front
         id: build
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./web
           file: ./web/Dockerfile.prod
@@ -139,9 +147,9 @@ jobs:
             ${{ env.IMAGEM }}:latest
 
       - name: Gerar SBOM com Syft
-        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
-          image-ref: ${{ env.IMAGEM }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.IMAGEM }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom-web.spdx.json
           upload-artifact: false
@@ -167,7 +175,7 @@ jobs:
           printf 'IMAGEM_WEB=%s\n' "${ALVO}" > image-web.env
 
       - name: Publicar evidências do front
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evidencias-web
           path: |
