@@ -16,7 +16,10 @@ WORKDIR /app
 COPY requirements.lock.txt .
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 
-COPY *.py ./
+# Código explícito: main.py/identificador.py são legado do Tkinter e não
+# devem entrar na imagem da API.
+COPY api.py detector.py ocr.py ocr_posicoes.py presidio_detector.py \
+     regex_parser.py test_api.py ./
 
 RUN chown -R appuser:appuser /app
 USER appuser

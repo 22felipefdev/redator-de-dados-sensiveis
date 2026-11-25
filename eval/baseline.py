@@ -23,6 +23,7 @@ import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+from detector import identificar_dados_sensiveis
 from ocr import extrair_texto
 from regex_parser import (extrair_evidencias, normalizar_digitos,
                           normalizar_codigo, normalizar_cnpj, PADRAO_RG,
@@ -39,6 +40,11 @@ CHAVE_REGEX = {"CPF": "cpfs_validos", "CNPJ": "cnpjs_validos",
                "EMAIL": "emails", "RG": "rgs_rotulados"}
 ENT_PRESIDIO = {"BR_CPF": "CPF", "BR_CNPJ": "CNPJ", "BR_CARTAO": "CARTAO",
                 "EMAIL_ADDRESS": "EMAIL", "BR_RG": "RG"}
+# O detector usa nomes amigáveis; o baseline trabalha com os rótulos do corpus.
+TIPO_PARA_BASE = {
+    "CPF": "CPF", "CNPJ": "CNPJ", "Cartão de crédito": "CARTAO",
+    "RG": "RG", "E-mail": "EMAIL",
+}
 ROTULOS = {
     "CPF": ("cpf", "contribuinte", "pessoa fisica", "pessoa física"),
     "CNPJ": ("cnpj", "inscricao", "inscrição", "empresa", "juridica", "jurídica"),
@@ -117,8 +123,9 @@ def carregar_verdade(img: Path) -> tuple[set, dict]:
     return reais, brutos
 
 
-def previstos_regex(texto: str) -> tuple[set, dict]:
-    evidencias = extrair_evidencias(texto)
+def previstos_regex(texto: str, evidencias=None) -> tuple[set, dict]:
+    if evidencias is None:
+        evidencias = extrair_evidencias(texto)
     achados, brutos = set(), {}
     for tipo, chave_evidencia in CHAVE_REGEX.items():
         for valor in evidencias[chave_evidencia]:
@@ -132,9 +139,11 @@ def previstos_regex(texto: str) -> tuple[set, dict]:
     return achados, brutos
 
 
-def previstos_presidio(texto: str) -> tuple[set, dict]:
+def previstos_presidio(texto: str, resultados=None) -> tuple[set, dict]:
+    if resultados is None:
+        resultados = analisar_texto(texto)
     achados, brutos = set(), {}
-    for resultado in analisar_texto(texto):
+    for resultado in resultados:
         tipo = ENT_PRESIDIO.get(resultado.entity_type)
         if not tipo:
             continue
@@ -145,6 +154,28 @@ def previstos_presidio(texto: str) -> tuple[set, dict]:
         achados.add(chave)
         brutos.setdefault(chave, trecho)
     return achados, brutos
+
+
+def previstos_sistema(texto: str, evidencias=None, resultados=None) -> set:
+    """Devolve o que a API realmente reportaria, sem regras próprias.
+
+    Antes o baseline recompunha a interseção regex/Presidio e podia aceitar um
+    item que o detector descarta (ex.: o mesmo CPF rotulado também como RG).
+    Usar identificar_dados_sensiveis() mantém o gate e a API em sincronia.
+    """
+    if evidencias is None:
+        evidencias = extrair_evidencias(texto)
+    if resultados is None:
+        resultados = analisar_texto(texto)
+
+    relatorio = identificar_dados_sensiveis(texto, evidencias, resultados)
+    achados = set()
+    for item in relatorio.itens:
+        tipo = TIPO_PARA_BASE.get(item.tipo)
+        if tipo is None:  # número de ofício não entra nas métricas do corpus
+            continue
+        achados.add((tipo, NORM[tipo](item.dado)))
+    return achados
 
 
 def linhas_relevantes(texto: str, tipo: str, alvo: str,
@@ -253,17 +284,17 @@ def main() -> None:
         reais, brutos_reais = carregar_verdade(img)
         texto = ler_texto(img)
 
-        regex, brutos_regex = previstos_regex(texto)
-        presidio, brutos_presidio = previstos_presidio(texto)
+        evidencias = extrair_evidencias(texto)
+        resultados = analisar_texto(texto)
+        regex, brutos_regex = previstos_regex(texto, evidencias)
+        presidio, brutos_presidio = previstos_presidio(texto, resultados)
         regex = remover_colisoes(regex)
         presidio = remover_colisoes(presidio)
         reparados = {
             ("EMAIL", NORM["EMAIL"](email["valor"]))
-            for email in extrair_emails_reparados(texto)
+            for email in evidencias["emails_reparados"]
         }
-        # Espelha detector.cruzar_evidencias(): interseção dos detectores mais
-        # os reparos marcados para revisão, que não dependem do Presidio.
-        sistema = (regex & presidio) | reparados
+        sistema = previstos_sistema(texto, evidencias, resultados)
 
         if args.diagnostico:
             diagnosticar(img, texto, reais, brutos_reais,
