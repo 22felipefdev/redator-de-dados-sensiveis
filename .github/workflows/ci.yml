@@ -47,3 +47,6 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # O pip publica um SBOM interno com versões vendidas (msgpack,
+          # urllib3, setuptools) que não são as instaladas na aplicação.
+          skip-files: /usr/local/lib/python3.13/site-packages/pip/_vendor/vendor.txt,/usr/local/lib/python3.13/site-packages/pip/_vendor/bom.cdx.json
