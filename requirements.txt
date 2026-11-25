@@ -6,3 +6,4 @@ spacy==3.8.18
 pytesseract==0.3.13
 Pillow==13.0.0
 pdfplumber==0.11.10
+pt-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/pt_core_news_sm-3.8.0/pt_core_news_sm-3.8.0-py3-none-any.whl --hash=sha256:c304fa04db3af73cd08a250feacf560506e15a2ec2469bd1b09f06847f6b455c

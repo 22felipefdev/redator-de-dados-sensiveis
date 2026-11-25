@@ -11,9 +11,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt \
- && python -m spacy download pt_core_news_sm
+# Lock com hashes: pip recusa qualquer artefato diferente do registrado.
+COPY requirements.lock.txt .
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 
 COPY *.py ./
 

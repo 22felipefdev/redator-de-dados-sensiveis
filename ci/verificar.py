@@ -76,12 +76,13 @@ def verificar_python(python, container=None):
         "test_api.py",
         "ci/verificar.py",
         "ci/test_verificar.py",
+        "ci/test_lock.py",
     ]
     executar([python, "-m", "py_compile", *arquivos], RAIZ, "sintaxe Python")
     executar(
-        [python, "-m", "unittest", "-v", "ci.test_verificar"],
+        [python, "-m", "unittest", "-v", "ci.test_verificar", "ci.test_lock"],
         RAIZ,
-        "testes do gate",
+        "testes do gate e do lock",
     )
 
     if container:
@@ -151,7 +152,7 @@ def verificar_vulnerabilidades():
     pip_audit = shutil.which("pip-audit")
     if pip_audit:
         executar(
-            [pip_audit, "-r", "requirements.txt"], RAIZ, "pip-audit"
+            [pip_audit, "-r", "requirements.lock.txt"], RAIZ, "pip-audit"
         )
     else:
         print("\nAVISO: pip-audit não instalado (instale no CI)")
