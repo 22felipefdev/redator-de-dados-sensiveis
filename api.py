@@ -28,7 +28,15 @@ if not logger.handlers:
     logger.addHandler(_handler)
 logger.propagate = False
 
-app = FastAPI(title="PrivacyDocs Scanner", version="1.0.0")
+# Em produção não expomos documentação/OpenAPI: superfície de ataque menor.
+producao = os.getenv("AMBIENTE", "").strip().lower() == "producao"
+app = FastAPI(
+    title="PrivacyDocs Scanner",
+    version="1.0.0",
+    docs_url=None if producao else "/docs",
+    redoc_url=None if producao else "/redoc",
+    openapi_url=None if producao else "/openapi.json",
+)
 
 # Origens configuráveis: em produção, defina CORS_ORIGINS com o domínio real.
 origens = [
