@@ -1,10 +1,13 @@
 """Testes da API. Execute: docker compose exec api python -m unittest -v test_api"""
 import io
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
+import api
+import ocr_posicoes
 from api import app
 
 cliente = TestClient(app)
@@ -97,6 +100,40 @@ class TesteAnalise(unittest.TestCase):
         )
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual(resposta.json()["arquivo"], "passwd.txt")
+
+    def test_cache_por_conteudo(self):
+        api._cache.clear()
+        imagem = imagem_com_cpf()
+        for _ in range(2):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("cache.png", imagem, "image/png")},
+            )
+            self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(len(api._cache), 1)
+        api._cache.clear()
+
+    def test_erro_generico_sem_vazamento(self):
+        api._cache.clear()
+        with patch.object(
+            api, "analisar_imagem", side_effect=RuntimeError("caminho_secreto")
+        ):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("erro.png", imagem_com_cpf(), "image/png")},
+            )
+        self.assertEqual(resposta.status_code, 500)
+        self.assertNotIn("caminho_secreto", resposta.text)
+
+    def test_limite_de_pixels(self):
+        api._cache.clear()
+        with patch.object(ocr_posicoes, "MAX_PIXELS", 10):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("grande.png", imagem_com_cpf(), "image/png")},
+            )
+        self.assertEqual(resposta.status_code, 500)
+        self.assertNotIn("imagem grande", resposta.text)
 
 
 if __name__ == "__main__":

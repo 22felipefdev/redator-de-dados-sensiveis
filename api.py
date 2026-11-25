@@ -1,7 +1,10 @@
 """API HTTP do scanner. O OCR/Presidio continuam exatamente os mesmos."""
+import hashlib
 import logging
 import os
 import tempfile
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -14,6 +17,14 @@ from presidio_detector import analisar_texto
 from regex_parser import extrair_evidencias
 
 logger = logging.getLogger("privacydocs")
+logger.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    logger.addHandler(_handler)
+logger.propagate = False
 
 app = FastAPI(title="PrivacyDocs Scanner", version="1.0.0")
 
@@ -34,8 +45,27 @@ app.add_middleware(
 
 EXTENSOES_ACEITAS = EXTENSOES_TEXTO | EXTENSOES_IMAGEM | {".pdf"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MiB
+CACHE_MAXIMO = 64  # entradas em memória; nada de PII gravado em disco
+
+
+def _versao_ocr():
+    """Invalida o cache quando o pré-processamento ou o OCR mudar."""
+    digest = hashlib.sha1()
+    for nome in ("ocr.py", "ocr_posicoes.py"):
+        caminho = Path(__file__).with_name(nome)
+        if caminho.exists():
+            digest.update(caminho.read_bytes())
+    return digest.hexdigest()[:8]
+
+
+VERSAO_CACHE = _versao_ocr()
+_cache: OrderedDict[str, dict] = OrderedDict()
 
 MENSAGEM_INVALIDO = "Arquivo inválido ou formato não suportado."
+
+
+def _chave_cache(conteudo: bytes) -> str:
+    return hashlib.sha256(conteudo).hexdigest() + VERSAO_CACHE
 
 
 def assinatura_valida(conteudo: bytes, extensao: str) -> bool:
@@ -88,26 +118,49 @@ def analisar(arquivo: UploadFile = File(...)):
         raise HTTPException(400, MENSAGEM_INVALIDO)
 
     # Rotas síncronas rodam em thread pool: o OCR não bloqueia outras requests.
+    inicio = time.perf_counter()
     try:
-        with tempfile.TemporaryDirectory() as temporario:
-            caminho = Path(temporario) / f"entrada{extensao}"
-            caminho.write_bytes(conteudo)
-
-            if extensao in EXTENSOES_IMAGEM:
-                leitura = analisar_imagem(caminho)
-                texto = leitura["texto"]
-                posicoes = leitura["posicoes"]
-            else:
-                texto = extrair_texto(caminho)
-                posicoes = None
+        if extensao in EXTENSOES_IMAGEM:
+            chave = _chave_cache(conteudo)
+            leitura = _cache.get(chave)
+            if leitura is None:
+                with tempfile.TemporaryDirectory() as temporario:
+                    caminho = Path(temporario) / f"entrada{extensao}"
+                    caminho.write_bytes(conteudo)
+                    leitura = analisar_imagem(caminho)
+                _cache[chave] = leitura
+                _cache.move_to_end(chave)
+                while len(_cache) > CACHE_MAXIMO:
+                    _cache.popitem(last=False)
+        else:
+            with tempfile.TemporaryDirectory() as temporario:
+                caminho = Path(temporario) / f"entrada{extensao}"
+                caminho.write_bytes(conteudo)
+                leitura = {"texto": extrair_texto(caminho), "posicoes": None}
     except Exception:
         # Detalhes ficam no servidor; o cliente não recebe caminhos nem versões.
-        logger.exception("Falha ao extrair texto de %s", nome)
+        logger.exception("Falha ao extrair texto de extensão %s", extensao)
         raise HTTPException(500, "Não foi possível ler o arquivo.") from None
 
+    texto = leitura["texto"]
+    posicoes = leitura["posicoes"]
+    logger.info(
+        "extracao concluida em %.0f ms (%d palavras)",
+        (time.perf_counter() - inicio) * 1000,
+        len(posicoes["palavras"]) if posicoes else 0,
+    )
+
+    inicio_deteccao = time.perf_counter()
     evidencias = extrair_evidencias(texto)
     resultados = analisar_texto(texto)
     relatorio = identificar_dados_sensiveis(texto, evidencias, resultados)
+    logger.info(
+        "deteccao concluida em %.0f ms: regex=%d presidio=%d itens=%d",
+        (time.perf_counter() - inicio_deteccao) * 1000,
+        len(evidencias),
+        len(resultados),
+        len(relatorio.itens),
+    )
 
     return {
         "arquivo": nome,

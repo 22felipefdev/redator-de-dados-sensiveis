@@ -14,6 +14,9 @@ from ocr import _preparar_imagem
 BORDA = 12
 LADO_MINIMO = 1800
 IDIOMA = "por"
+# Imagens absurdamente grandes travariam o worker antes mesmo do OCR.
+MAX_PIXELS = 25_000_000
+TIMEOUT = float(os.getenv("OCR_TIMEOUT", "60"))
 
 
 def analisar_imagem(caminho):
@@ -25,6 +28,8 @@ def analisar_imagem(caminho):
     with Image.open(caminho) as imagem:
         orientada = ImageOps.exif_transpose(imagem)
         largura, altura = orientada.size
+        if largura * altura > MAX_PIXELS:
+            raise ValueError("imagem grande demais para processamento")
         preparada = _preparar_imagem(imagem)
 
     # A mesma escala aplicada em _preparar_imagem; usada para voltar às
@@ -40,6 +45,7 @@ def analisar_imagem(caminho):
             lang=IDIOMA,
             config=f"--oem 3 --psm {psm}",
             output_type=pytesseract.Output.DICT,
+            timeout=TIMEOUT,
         )
         confiancas = [
             float(valor)
