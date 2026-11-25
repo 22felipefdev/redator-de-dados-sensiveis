@@ -76,6 +76,16 @@ def cruzar_evidencias(texto, evidencias_regex, resultados_presidio):
             if normalizar(valor) in valores_presidio
         ]
 
+    # O CPF passa por validação de dígitos verificadores; o RG depende só do
+    # rótulo. Se o OCR associar o rótulo RG ao mesmo CPF, manter os dois
+    # contaria o dado duas vezes. O CPF prevalece.
+    cpfs = {normalizar_digitos(v) for v in confirmadas.get("cpfs_validos", [])}
+    confirmadas["rgs_rotulados"] = [
+        valor
+        for valor in confirmadas.get("rgs_rotulados", [])
+        if normalizar_digitos(valor) not in cpfs
+    ]
+
     cnpjs = {normalizar_cnpj(v) for v in confirmadas.get("cnpjs_validos", [])}
     confirmadas["cartoes_credito_validados"] = [
         valor for valor in confirmadas.get("cartoes_credito_validados", [])

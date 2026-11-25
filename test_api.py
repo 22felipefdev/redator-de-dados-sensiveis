@@ -29,6 +29,27 @@ def imagem_com_cpf() -> bytes:
     return buffer.getvalue()
 
 
+class TesteDetector(unittest.TestCase):
+    def test_cpf_valido_nao_e_repetido_como_rg(self):
+        texto = "CPF: 678.085.841-26\nRG: 678.085.841-26"
+        relatorio = api.identificar_dados_sensiveis(
+            texto, api.extrair_evidencias(texto), api.analisar_texto(texto)
+        )
+        itens = [(item.tipo, item.dado) for item in relatorio.itens]
+        self.assertEqual(itens.count(("CPF", "678.085.841-26")), 1)
+        self.assertNotIn(("RG", "678.085.841-26"), itens)
+
+    def test_rg_legitimo_continua_sendo_detectado(self):
+        texto = "RG: 91.214.125-4"
+        relatorio = api.identificar_dados_sensiveis(
+            texto, api.extrair_evidencias(texto), api.analisar_texto(texto)
+        )
+        self.assertIn(
+            ("RG", "91.214.125-4"),
+            [(item.tipo, item.dado) for item in relatorio.itens],
+        )
+
+
 class TesteSaude(unittest.TestCase):
     def test_saude(self):
         resposta = cliente.get("/api/saude")
