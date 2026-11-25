@@ -77,12 +77,21 @@ def verificar_python(python, container=None):
         "ci/verificar.py",
         "ci/test_verificar.py",
         "ci/test_lock.py",
+        "ci/test_workflows.py",
     ]
     executar([python, "-m", "py_compile", *arquivos], RAIZ, "sintaxe Python")
     executar(
-        [python, "-m", "unittest", "-v", "ci.test_verificar", "ci.test_lock"],
+        [
+            python,
+            "-m",
+            "unittest",
+            "-v",
+            "ci.test_verificar",
+            "ci.test_lock",
+            "ci.test_workflows",
+        ],
         RAIZ,
-        "testes do gate e do lock",
+        "testes do gate, do lock e dos workflows",
     )
 
     if container:
