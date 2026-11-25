@@ -6,9 +6,10 @@ pdfplumber - Leitura e extração de PDF para análise.
 pytesseract - Integra o Python ao mecanismo Tesseract para OCR de PDFs digitalizados e imagens.
 Pillow - Abre/prepara imagens e permite renderizar páginas do PDF para OCR.
 reportlab (opcional) - Gera relatório em PDF com dados falsos para testar análise.
+fastapi/uvicorn - Expõem o endpoint HTTP; pydantic é usado apenas nos modelos de resposta.
 
-O scanner não usa mais modelo de linguagem externo: não precisa de OPENROUTER_API_KEY,
-internet, openai, instructor, httpx, dotenv nem pydantic. O relatório é montado
+O scanner não usa modelo de linguagem externo: não precisa de OPENROUTER_API_KEY,
+internet, openai, instructor, httpx nem dotenv. O relatório é montado
 deterministicamente a partir da interseção regex + Presidio.
 
 Comando para instalar as bibliotecas necessárias:

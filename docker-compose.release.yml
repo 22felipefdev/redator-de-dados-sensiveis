@@ -1,0 +1,15 @@
+# Sobrepõe a produção para usar as imagens publicadas por digest.
+# Os digests são publicados como artefatos evidencias-api/evidencias-web.
+# Uso:
+#   IMAGEM_API=ghcr.io/owner/repo/api@sha256:... \
+#   IMAGEM_WEB=ghcr.io/owner/repo/web@sha256:... \
+#   docker compose -f docker-compose.prod.yml -f docker-compose.release.yml up -d
+
+services:
+  api:
+    image: ${IMAGEM_API:?Defina IMAGEM_API como tag@sha256:...}
+    build: !reset null
+
+  web:
+    image: ${IMAGEM_WEB:?Defina IMAGEM_WEB como tag@sha256:...}
+    build: !reset null

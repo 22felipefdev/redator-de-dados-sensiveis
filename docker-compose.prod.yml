@@ -1,0 +1,57 @@
+# Produção: sem hot reload, sem volumes de código e rootfs somente leitura.
+# Uso: API_PORT=8001 WEB_PORT=5174 docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  api:
+    build:
+      context: .
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      AMBIENTE: producao
+      OCR_CONCORRENCIA: "2"
+      OCR_TIMEOUT: "60"
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: "http://localhost:${WEB_PORT:-5173}"
+      # Em produção real, substitua pelo domínio do front:
+      # CORS_ORIGINS: "https://privacydocs.example.com"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+          pids: 256
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5173}:8080"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,mode=1777
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+          pids: 128

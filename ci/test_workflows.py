@@ -34,6 +34,40 @@ class TesteWorkflows(unittest.TestCase):
                             f"{caminho.name}/{nome}: ação móvel {uso}",
                         )
 
+    def test_release_usa_front_do_monorepo(self):
+        caminho = RAIZ / ".github" / "workflows" / "release.yml"
+        conteudo = caminho.read_text(encoding="utf-8")
+        self.assertNotIn("WEB_REPO", conteudo)
+        self.assertNotIn("web_repo", conteudo)
+
+        dados = yaml.safe_load(conteudo)
+        web = dados["jobs"]["web"]
+        self.assertNotIn("if", web)
+
+        checkouts = [
+            passo for passo in web["steps"]
+            if str(passo.get("uses", "")).startswith("actions/checkout")
+        ]
+        self.assertEqual(len(checkouts), 1)
+        self.assertNotIn("repository", checkouts[0].get("with", {}))
+
+        builds = [
+            passo for passo in web["steps"]
+            if str(passo.get("uses", "")).startswith("docker/build-push-action")
+        ]
+        self.assertEqual(builds[0]["with"]["context"], "./web")
+        self.assertEqual(builds[0]["with"]["file"], "./web/Dockerfile.prod")
+
+    def test_ci_inclui_front_local(self):
+        caminho = RAIZ / ".github" / "workflows" / "ci.yml"
+        dados = yaml.safe_load(caminho.read_text(encoding="utf-8"))
+        passos = dados["jobs"]["verificar"]["steps"]
+        comandos = [str(passo.get("run", "")) for passo in passos]
+        self.assertTrue(any("npm ci --prefix web" in comando for comando in comandos))
+        self.assertTrue(
+            any(passo.get("env", {}).get("WEB_DIR") for passo in passos)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

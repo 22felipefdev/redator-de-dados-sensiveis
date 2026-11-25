@@ -22,6 +22,13 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Preparar Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       - name: Instalar Tesseract para os testes de OCR
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por
 
@@ -31,11 +38,13 @@ jobs:
           python -m pip install pip-audit
           python -m pip install --require-hashes -r requirements.lock.txt
 
-      - name: Testes, sintaxe, lock, baseline e auditoria
+      - name: Instalar dependências do front
+        run: npm ci --prefix web
+
+      - name: Testes, sintaxe, lock, baseline, front e auditoria
         run: python ci/verificar.py
-        # Para incluir o front, descomente e aponte para o checkout do React:
-        # env:
-        #   WEB_DIR: ${{ github.workspace }}/web
+        env:
+          WEB_DIR: ${{ github.workspace }}/web
 
       - name: Construir imagem
         run: docker build -t redator-api:ci .

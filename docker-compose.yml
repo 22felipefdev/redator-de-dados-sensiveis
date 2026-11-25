@@ -1,0 +1,46 @@
+# Desenvolvimento: API com recarga automática e Vite com HMR.
+# Uso: docker compose up -d --build
+
+services:
+  api:
+    build:
+      context: .
+    command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+      # Em produção, substitua pela origem real do front-end:
+      # CORS_ORIGINS: "https://privacydocs.example.com"
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    # Hot reload do Python sem trazer .venv, corpus nem imagens para o container.
+    volumes:
+      - ./api.py:/app/api.py:ro
+      - ./detector.py:/app/detector.py:ro
+      - ./ocr.py:/app/ocr.py:ro
+      - ./ocr_posicoes.py:/app/ocr_posicoes.py:ro
+      - ./presidio_detector.py:/app/presidio_detector.py:ro
+      - ./regex_parser.py:/app/regex_parser.py:ro
+      - ./test_api.py:/app/test_api.py:ro
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    volumes:
+      - ./web/src:/app/src
+      - ./web/index.html:/app/index.html
+      - ./web/vite.config.ts:/app/vite.config.ts

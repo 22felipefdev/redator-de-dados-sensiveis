@@ -1,11 +1,12 @@
 r"""Gate único de verificação: testes, sintaxe, baseline, front e vulnerabilidades.
 
 Uso:
-    python ci/verificar.py --docker --web <pasta-do-front> --exigir-baseline
-    python ci/verificar.py                         # no CI, com FastAPI instalado
+    python ci/verificar.py --exigir-baseline       # front em web/
+    python ci/verificar.py --web <outro-front>     # caminho alternativo
 
-Use --docker quando o Python local não tiver FastAPI e os testes rodarem no
-container da API.
+O front vive em web/ neste monorepo. Use --web (ou WEB_DIR) apenas para apontar
+para outra pasta. Com --container os testes da API rodam dentro do container,
+útil quando o Python local não tem FastAPI.
 
 O corpus é dado do cliente e não é versionado. Sem ele o baseline é avisado e
 pulado; use --exigir-baseline quando o corpus estiver disponível no runner.
@@ -25,6 +26,7 @@ for fluxo in (sys.stdout, sys.stderr):
 
 RAIZ = Path(__file__).resolve().parent.parent
 CORPUS = RAIZ / "eval" / "corpus"
+WEB_PADRAO = RAIZ / "web"
 
 RECALL_MINIMO = 99
 FP_MAXIMO = 2
@@ -123,9 +125,12 @@ def verificar_baseline(python, exigir):
         return
 
     ambiente = os.environ.copy()
-    ambiente.setdefault(
-        "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    )
+    # No Linux o Tesseract vem do PATH (apt no CI); no Windows, se não estiver
+    # no PATH, usamos o caminho de instalação padrão.
+    if os.name == "nt" and not shutil.which("tesseract"):
+        ambiente.setdefault(
+            "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        )
     saida = executar(
         [python, "eval/baseline.py"], RAIZ, "baseline de recall", ambiente
     )
@@ -201,7 +206,7 @@ def verificar_vulnerabilidades():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--web", default=os.getenv("WEB_DIR"))
+    parser.add_argument("--web", default=os.getenv("WEB_DIR") or str(WEB_PADRAO))
     parser.add_argument("--python", default=python_padrao())
     parser.add_argument("--exigir-baseline", action="store_true")
     parser.add_argument(
