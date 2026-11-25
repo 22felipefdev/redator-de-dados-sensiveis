@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from detector import identificar_dados_sensiveis
 from ocr import EXTENSOES_IMAGEM, EXTENSOES_TEXTO, extrair_texto
@@ -70,6 +71,35 @@ _cache: OrderedDict[str, dict] = OrderedDict()
 MENSAGEM_INVALIDO = "Arquivo inválido ou formato não suportado."
 
 
+# Contrato explícito: nenhum campo novo criado por acidente sai da API.
+class PalavraResponse(BaseModel):
+    texto: str
+    x: int
+    y: int
+    largura: int
+    altura: int
+
+
+class PosicoesResponse(BaseModel):
+    largura: int
+    altura: int
+    palavras: list[PalavraResponse]
+
+
+class ItemResponse(BaseModel):
+    dado: str
+    tipo: str
+    risco: str
+    revisar: bool = False
+    original: str | None = None
+
+
+class AnaliseResponse(BaseModel):
+    arquivo: str
+    posicoes: PosicoesResponse | None = None
+    itens: list[ItemResponse]
+
+
 def _chave_cache(conteudo: bytes) -> str:
     return hashlib.sha256(conteudo).hexdigest() + VERSAO_CACHE
 
@@ -102,7 +132,7 @@ def saude():
     return {"status": "ok"}
 
 
-@app.post("/api/analisar")
+@app.post("/api/analisar", response_model=AnaliseResponse)
 def analisar(arquivo: UploadFile = File(...)):
     """Recebe o arquivo e devolve os itens confirmados por regex + Presidio."""
     # nome é só o basename: nunca usamos o caminho enviado pelo cliente.

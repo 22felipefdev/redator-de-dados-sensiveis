@@ -146,6 +146,30 @@ class TesteAnalise(unittest.TestCase):
         self.assertEqual(resposta.status_code, 503)
         self.assertEqual(resposta.headers["Retry-After"], "5")
 
+    def test_contrato_remove_campos_extras(self):
+        api._cache.clear()
+        with patch.object(
+            api,
+            "analisar_imagem",
+            return_value={
+                "texto": "CPF: 123.456.789-09",
+                "posicoes": {
+                    "largura": 10,
+                    "altura": 10,
+                    "palavras": [],
+                    "campo_interno": "NAO_DEVE_SAIR",
+                },
+                "texto_interno": "NAO_DEVE_SAIR",
+            },
+        ):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("contrato.png", imagem_com_cpf(), "image/png")},
+            )
+        api._cache.clear()
+        self.assertEqual(resposta.status_code, 200)
+        self.assertNotIn("NAO_DEVE_SAIR", resposta.text)
+
     def test_semaphore_liberado_apos_falha(self):
         api._cache.clear()
         with patch.object(api, "analisar_imagem", side_effect=RuntimeError("falha")):
