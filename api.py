@@ -79,6 +79,18 @@ _cache: OrderedDict[str, dict] = OrderedDict()
 MENSAGEM_INVALIDO = "Arquivo inválido ou formato não suportado."
 
 
+def contar_evidencias(evidencias):
+    """Conta grupos com achado e total de candidatos antes da interseção.
+
+    ``len(evidencias)`` devolve sempre 7: é o número de chaves do dicionário,
+    não o que o regex encontrou.
+    """
+    return (
+        sum(1 for valores in evidencias.values() if valores),
+        sum(len(valores) for valores in evidencias.values()),
+    )
+
+
 # Contrato explícito: nenhum campo novo criado por acidente sai da API.
 class PalavraResponse(BaseModel):
     texto: str
@@ -210,10 +222,14 @@ def analisar(arquivo: UploadFile = File(...)):
     evidencias = extrair_evidencias(texto)
     resultados = analisar_texto(texto)
     relatorio = identificar_dados_sensiveis(texto, evidencias, resultados)
+    # Quantos tipos o regex encontrou e quantos candidatos entraram no pipeline.
+    grupos_regex, candidatos_regex = contar_evidencias(evidencias)
     logger.info(
-        "deteccao concluida em %.0f ms: regex=%d presidio=%d itens=%d",
+        "deteccao concluida em %.0f ms: "
+        "grupos_regex=%d candidatos_regex=%d presidio=%d itens=%d",
         (time.perf_counter() - inicio_deteccao) * 1000,
-        len(evidencias),
+        grupos_regex,
+        candidatos_regex,
         len(resultados),
         len(relatorio.itens),
     )

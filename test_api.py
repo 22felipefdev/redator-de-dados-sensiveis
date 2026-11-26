@@ -203,5 +203,37 @@ class TesteAnalise(unittest.TestCase):
         api._limite_ocr.release()
 
 
+class TesteMetricaDeLog(unittest.TestCase):
+    def test_contagem_nao_e_numero_de_chaves(self):
+        evidencias = {
+            "emails": [],
+            "emails_reparados": [{"valor": "joao@example.com"}],
+            "cartoes_credito_validados": [],
+            "numeros_de_oficio": [],
+            "cpfs_validos": ["123.456.789-09"],
+            "cnpjs_validos": [],
+            "rgs_rotulados": [],
+        }
+        self.assertEqual(len(evidencias), 7)
+        self.assertEqual(api.contar_evidencias(evidencias), (2, 2))
+
+    def test_log_usa_campos_explicitos(self):
+        api._cache.clear()
+        conteudo = b"CPF: 123.456.789-09\n"
+        with self.assertLogs("privacydocs", level="INFO") as capturado:
+            cliente.post(
+                "/api/analisar",
+                files={"arquivo": ("metrica.txt", conteudo, "text/plain")},
+            )
+        linhas = [
+            linha for linha in capturado.output if "deteccao concluida" in linha
+        ]
+        self.assertEqual(len(linhas), 1)
+        self.assertIn("grupos_regex=", linhas[0])
+        self.assertIn("candidatos_regex=", linhas[0])
+        # O campo antigo era solto: "70 ms: regex=7 presidio=..."
+        self.assertNotRegex(linhas[0], r"(?<![a-z_])regex=\d+")
+
+
 if __name__ == "__main__":
     unittest.main()
