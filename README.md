@@ -27,6 +27,8 @@ A API não devolve o documento: responde com os trechos detectados, classificaç
 ├── eval/                                       # baseline e corpus do cliente (não versionado)
 ├── .github/workflows/
 │   ├── ci.yml                                  # testes, front, baseline e Trivy
+│   ├── gitleaks.yml                            # varredura de segredos no histórico
+│   ├── codeql.yml                              # análise estática (Python e JS/TS)
 │   └── release.yml                             # imagens, SBOM, cosign e digests
 └── docker-compose*.yml                         # dev, produção e deploy por digest
 ```
@@ -181,6 +183,8 @@ O gate verifica: sintaxe, testes do gate/lock/workflows, testes da API, `npm run
 - `requirements.lock.txt` registra todas as dependências, incluindo o modelo spaCy, com hash SHA-256. O Dockerfile instala com `--require-hashes`.
 - Imagens-base (Python, Node e Nginx) e Ações do GitHub fixadas por digest/SHA.
 - `.github/workflows/ci.yml`: `pip-audit` no lock e Trivy na imagem. O Trivy ignora somente `pip/_vendor/vendor.txt` e `pip/_vendor/bom.cdx.json`, manifestos internos do pip que fixam versões vendidas diferentes das instaladas na aplicação.
+- `.github/workflows/gitleaks.yml`: Gitleaks no histórico inteiro (push, PR e agenda semanal). O resultado sai no log e no resumo da execução; comentários de PR e artefatos ficam desligados porque o job só tem `contents:read`.
+- `.github/workflows/codeql.yml`: CodeQL em Python e JavaScript/TypeScript com `build-mode: none` (linguagens interpretadas) e envio dos resultados ao Code Scanning (`security-events: write`).
 - `.github/workflows/release.yml`: publica `ghcr.io/<owner>/<repo>/api:*` e `/web:*`, gera SBOM SPDX com Syft, assina e atesta com cosign keyless, verifica por digest e publica os digests como artefatos.
 - Nenhuma PII é gravada em disco pela API; o cache de OCR é em memória.
 

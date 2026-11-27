@@ -1,0 +1,42 @@
+name: CodeQL
+
+# Análise estática para Python e JavaScript/TypeScript. Ambas são linguagens
+# interpretadas, então o banco é criado com build-mode: none (sem build).
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "27 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analise:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      # Obrigatório para enviar os resultados ao Code Scanning.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        linguagem: [python, javascript-typescript]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar CodeQL
+        uses: github/codeql-action/init@e274593ecfcbcdc39c8f034978d84614cebcb71d # v4.39.5
+        with:
+          languages: ${{ matrix.linguagem }}
+          build-mode: none
+
+      - name: Analisar e publicar resultados
+        uses: github/codeql-action/analyze@e274593ecfcbcdc39c8f034978d84614cebcb71d # v4.39.5
+        with:
+          category: "/language:${{ matrix.linguagem }}"
