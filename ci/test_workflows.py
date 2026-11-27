@@ -82,6 +82,29 @@ class TesteWorkflows(unittest.TestCase):
             any(passo.get("env", {}).get("WEB_DIR") for passo in passos)
         )
 
+    def test_ci_correcao_e_ignorados_do_trivy(self):
+        dockerfile = (RAIZ / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("apt-get dist-upgrade -y --no-install-recommends", dockerfile)
+
+        dados = yaml.safe_load(
+            (RAIZ / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
+        passos = dados["jobs"]["verificar"]["steps"]
+        trivy = [
+            passo
+            for passo in passos
+            if "trivy-action" in str(passo.get("uses", ""))
+        ]
+        self.assertEqual(len(trivy), 1)
+        ignorados = trivy[0]["with"]["skip-files"].split(",")
+        self.assertEqual(
+            ignorados,
+            [
+                "/usr/local/lib/python3.13/site-packages/pip/_vendor/vendor.txt",
+                "/usr/local/lib/python3.13/site-packages/pip/_vendor/bom.cdx.json",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

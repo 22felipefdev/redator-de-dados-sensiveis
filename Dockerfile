@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Tesseract + dicionário de português para o OCR de imagens e PDFs digitalizados.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-por \
+ && apt-get dist-upgrade -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1000 appuser
 
