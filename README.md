@@ -3,8 +3,8 @@
 Monorepo com a API e a interface web do scanner.
 
 - **API (FastAPI):** recebe PDF, imagem ou texto e **apenas detecta** dados sensíveis.
-- **Front (React):** mostra a prévia e aplica a redação **no navegador**, com `pdf.js` e `pdf-lib`.
-- **Runtime determinístico:** regex + Presidio + Tesseract. Sem LLM, sem chave de API e sem acesso à internet em produção.
+- **Front (React):** mostra a prévia, separa o que regex/Presidio decidiu das sugestões da IA (sempre desmarcadas) e aplica a redação **no navegador**, com `pdf.js` e `pdf-lib`.
+- **Runtime determinístico por padrão:** regex + Presidio + Tesseract. A IA de contexto é opt-in (`IA_CONTEXTO=1`), nunca cria ou corrige dados, e as referências LGPD são anexadas pela API.
 
 A API não devolve o documento: responde com os trechos detectados, classificação, risco, sinalização de revisão e — para imagens/PDFs digitalizados — as posições das palavras para o navegador pintar a redação.
 
@@ -18,7 +18,9 @@ A API não devolve o documento: responde com os trechos detectados, classificaç
 ├── Dockerfile                                  # imagem da API (Tesseract + pt)
 ├── requirements.lock.txt                       # dependências com hash SHA-256
 ├── web/                                        # front React/TypeScript (sem JSX)
-│   ├── src/App.ts                              # interface, prévia e redação locais
+│   ├── src/App.ts                              # fluxo envio → revisão → download
+│   ├── src/components/redactor/                # cabeçalho, upload, prévia, achados, resultado
+│   ├── src/lib/redactor/                       # contrato, API, detecção e pdf.js/pdf-lib
 │   ├── Dockerfile                              # dev (Vite)
 │   └── Dockerfile.prod                         # produção (Nginx não privilegiado)
 ├── ci/                                         # gate, testes do gate e dos workflows
@@ -29,7 +31,7 @@ A API não devolve o documento: responde com os trechos detectados, classificaç
 └── docker-compose*.yml                         # dev, produção e deploy por digest
 ```
 
-O antigo repositório `22felipefdev/redator-web` permanece apenas como histórico. A fonte canônica do front é `web/` neste repositório.
+O antigo repositório `22felipefdev/redator-web` permanece apenas como histórico. A fonte canônica do front é `web/` neste repositório. O visual foi portado do protótipo `redesign-de-app-redator`, mas a implementação usa Vite/React com `React.createElement` em arquivos `.ts` (sem JSX), Tailwind 4 via PostCSS e fontes IBM Plex. A prévia e as tarjas são aplicadas no navegador (`pdf.js`/`pdf-lib`); a API apenas classifica. Imagens usam OCR com coordenadas quando `posicoes` está presente, e arquivos de texto voltam intactos — só são sinalizados. Nenhum nome de fornecedor ou modelo aparece na interface.
 
 ## Executando
 

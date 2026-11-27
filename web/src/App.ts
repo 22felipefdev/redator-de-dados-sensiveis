@@ -1,764 +1,411 @@
+import { createElement as h, useCallback, useState } from 'react';
+import { AppHeader } from './components/redactor/app-header';
+import { AnalysisProgress } from './components/redactor/analysis-progress';
+import { DocumentViewer } from './components/redactor/document-viewer';
+import { FindingsPanel } from './components/redactor/findings-panel';
+import { ResultPanel } from './components/redactor/result-panel';
+import { UploadZone } from './components/redactor/upload-zone';
+import { analisarNaApi } from './lib/redactor/api';
+import { detectarComApi, detectarLocalmente, indexarPagina, itensParaTexto } from './lib/redactor/detection';
 import {
-    Fragment,
-    createElement,
-    useCallback,
-    useState,
-} from 'react';
-import type { ChangeEvent } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
-import { PDFDocument } from 'pdf-lib';
-import './App.css';
+    TAMANHO_MAXIMO,
+    carregarImagem,
+    gerarImagemCensurada,
+    gerarPdfCensurado,
+    liberarPaginas,
+    renderizarPdf,
+    tipoDoArquivo,
+} from './lib/redactor/document';
+import type { Caixa, Dado, ModoDeteccao, Pagina, Resultado, TipoArquivo, Trecho } from './lib/redactor/types';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-const EXTENSOES_PDF = ['.pdf'];
-const EXTENSOES_IMAGEM = ['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'];
-const EXTENSOES_TEXTO = ['.txt', '.csv', '.json', '.log', '.py'];
-const ACEITAS = [...EXTENSOES_PDF, ...EXTENSOES_IMAGEM, ...EXTENSOES_TEXTO];
-
-type TipoArquivo = 'pdf' | 'imagem' | 'texto';
-
-function tipoArquivo(nome: string): TipoArquivo | null {
-    const ponto = nome.lastIndexOf('.');
-    const extensao = ponto < 0 ? '' : nome.slice(ponto).toLowerCase();
-    if (EXTENSOES_PDF.includes(extensao)) {
-        return 'pdf';
-    }
-    if (EXTENSOES_IMAGEM.includes(extensao)) {
-        return 'imagem';
-    }
-    if (EXTENSOES_TEXTO.includes(extensao)) {
-        return 'texto';
-    }
-    return null;
-}
-
-function extensaoArquivo(nome: string): string {
-    const ponto = nome.lastIndexOf('.');
-    return ponto < 0 ? '' : nome.slice(ponto).toLowerCase();
-}
-
-interface Regiao {
-    id: string;
-    x: number;
-    y: number;
-    largura: number;
-    altura: number;
-}
-
-interface Trecho {
-    texto: string;
-    pagina: number;
-    x: number;
-    y: number;
-    largura: number;
-    altura: number;
-}
-
-interface Palavra {
-    texto: string;
-    x: number;
-    y: number;
-    largura: number;
-    altura: number;
-}
-
-interface Posicoes {
-    largura: number;
-    altura: number;
-    palavras: Palavra[];
-}
-
-interface Pagina {
-    canvas: HTMLCanvasElement;
-    largura: number;
-    altura: number;
-    escala: number;
-    regioes: Regiao[];
-}
-
-interface ItemApi {
-    dado: string;
-    tipo: string;
-    risco: string;
-    revisar: boolean;
-    original: string | null;
-    origem?: string;
-    selecionar_por_padrao?: boolean;
-    confianca?: number | null;
-}
-
-interface RespostaApi {
-    arquivo: string;
-    posicoes: Posicoes | null;
-    itens: ItemApi[];
-}
-
-interface Dado {
-    id: string;
-    categoria: string;
-    valor: string;
-    pagina: number;
-    revisar: boolean;
-    origem: string;
-    selecionarPorPadrao: boolean;
-    confianca?: number;
-}
-
-// Comparação tolerante a pontuação, espaços e acentos: o backend devolve o
-// valor normalizado, enquanto o OCR lê o texto como ele está no documento.
-function normalizar(texto: string): string {
-    return texto
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
-}
-
-function candidatos(item: ItemApi): string[] {
-    return [item.original, item.dado].filter(
-        (valor): valor is string => Boolean(valor),
-    );
-}
-
-function localizar(item: ItemApi, trechos: Trecho[]): Trecho | undefined {
-    for (const candidato of candidatos(item)) {
-        const alvo = normalizar(candidato);
-        if (alvo.length < 4) {
-            continue;
-        }
-        const encontrado = trechos.find((trecho) =>
-            normalizar(trecho.texto).includes(alvo),
-        );
-        if (encontrado) {
-            return encontrado;
-        }
-    }
-    return undefined;
-}
-
-// O OCR devolve palavras em ordem de leitura. Um dado pode virar duas ou mais
-// palavras (ex.: "123.456.789-09"), então procuramos janelas consecutivas e
-// devolvemos a caixa que envolve todas elas.
-function caixaEmPalavras(
-    item: ItemApi,
-    palavras: Palavra[],
-): Omit<Regiao, 'id'> | undefined {
-    const normalizadas = palavras.map((palavra) => normalizar(palavra.texto));
-
-    for (const candidato of candidatos(item)) {
-        const alvo = normalizar(candidato);
-        if (alvo.length < 4) {
-            continue;
-        }
-
-        for (let inicio = 0; inicio < palavras.length; inicio++) {
-            let acumulado = '';
-            for (
-                let fim = inicio;
-                fim < Math.min(inicio + 10, palavras.length);
-                fim++
-            ) {
-                acumulado += normalizadas[fim];
-                // Sem o limite de tamanho, uma janela que começa no topo da
-                // página acabaria casando o fim e cobrindo o documento inteiro.
-                if (
-                    !acumulado.includes(alvo) ||
-                    acumulado.length - alvo.length > Math.max(8, alvo.length)
-                ) {
-                    continue;
-                }
-
-                const encontradas = palavras.slice(inicio, fim + 1);
-                const x = Math.min(...encontradas.map((palavra) => palavra.x));
-                const y = Math.min(...encontradas.map((palavra) => palavra.y));
-                const direita = Math.max(
-                    ...encontradas.map((palavra) => palavra.x + palavra.largura),
-                );
-                const baixo = Math.max(
-                    ...encontradas.map((palavra) => palavra.y + palavra.altura),
-                );
-
-                return {
-                    x: x - 2,
-                    y: y - 2,
-                    largura: direita - x + 4,
-                    altura: baixo - y + 4,
-                };
-            }
-        }
-    }
-
-    return undefined;
-}
-
-function Sidebar() {
-    return createElement(
-        'aside',
-        { className: 'sidebar' },
-        createElement('h2', null, '🔒 PrivacyDocs'),
-        createElement(
-            'nav',
-            null,
-            createElement('a', { href: '#' }, 'Início'),
-            createElement('a', { href: '#' }, 'Novo documento'),
-        ),
-        createElement('p', null, 'Sua privacidade é nossa prioridade.'),
-    );
-}
+type Etapa = 'envio' | 'analisando' | 'revisao' | 'resultado';
 
 export default function App() {
+    const [etapa, setEtapa] = useState<Etapa>('envio');
     const [arquivo, setArquivo] = useState<File | null>(null);
-    const [tipo, setTipo] = useState<TipoArquivo | null>(null);
-    const [mensagem, setMensagem] = useState('Selecione um arquivo.');
-    const [dados, setDados] = useState<Dado[]>([]);
-    const [selecionados, setSelecionados] = useState<string[]>([]);
-    const [previa, setPrevia] = useState('A pré-visualização aparecerá aqui.');
-    const [processando, setProcessando] = useState(false);
-    // Trocar a key remonta o <input> e limpa o arquivo escolhido anteriormente.
-    const [chaveInput, setChaveInput] = useState(0);
+    const [tipo, setTipo] = useState<TipoArquivo>('pdf');
     const [paginas, setPaginas] = useState<Pagina[]>([]);
+    const [dados, setDados] = useState<Dado[]>([]);
+    const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+    const [modo, setModo] = useState<ModoDeteccao>('api');
+    const [progresso, setProgresso] = useState('');
+    const [detalhe, setDetalhe] = useState('');
+    const [erro, setErro] = useState<string | null>(null);
+    const [modoDesenho, setModoDesenho] = useState(false);
+    const [destacado, setDestacado] = useState<string | null>(null);
+    const [gerando, setGerando] = useState(false);
+    const [resultado, setResultado] = useState<Resultado | null>(null);
 
-    const limparTela = useCallback(() => {
-        paginas.forEach((pagina) => {
-            pagina.canvas.width = 0;
-            pagina.canvas.height = 0;
+    const descartarResultado = useCallback(() => {
+        setResultado((atual) => {
+            if (atual) {
+                URL.revokeObjectURL(atual.url);
+                atual.paginas.forEach((pagina) => URL.revokeObjectURL(pagina.url));
+            }
+            return null;
         });
-        setPaginas([]);
-        setArquivo(null);
-        setTipo(null);
-        setDados([]);
-        setSelecionados([]);
-        setPrevia('A pré-visualização aparecerá aqui.');
-        setChaveInput((atual) => atual + 1);
-    }, [paginas]);
-
-    const alternar = useCallback((id: string, marcado: boolean) => {
-        setSelecionados((atuais) =>
-            marcado
-                ? [...atuais, id]
-                : atuais.filter((item) => item !== id),
-        );
     }, []);
+
+    const reiniciar = useCallback(() => {
+        descartarResultado();
+        setPaginas((atuais) => {
+            liberarPaginas(atuais);
+            return [];
+        });
+        setArquivo(null);
+        setDados([]);
+        setSelecionados(new Set());
+        setModoDesenho(false);
+        setDestacado(null);
+        setErro(null);
+        setEtapa('envio');
+    }, [descartarResultado]);
 
     const analisar = useCallback(
         async (selecionado: File) => {
-            limparTela();
-
-            const tipoDetectado = tipoArquivo(selecionado.name);
+            reiniciar();
+            const tipoDetectado = tipoDoArquivo(selecionado.name);
             if (!tipoDetectado) {
-                setMensagem(
-                    'Formato não suportado. Use PDF, imagem ou arquivo de texto.',
-                );
+                setErro('Formato não suportado. Envie PDF, imagem (PNG, JPG, WEBP) ou texto (TXT, CSV, JSON, LOG, PY).');
+                return;
+            }
+            if (selecionado.size > TAMANHO_MAXIMO) {
+                setErro('O arquivo passa do limite de 20 MB.');
                 return;
             }
 
             setArquivo(selecionado);
             setTipo(tipoDetectado);
-            setMensagem('Enviando para o scanner (OCR + Presidio + IA)...');
-            setPrevia('Aguardando a API Python...');
+            setEtapa('analisando');
+            setProgresso('Lendo o documento…');
+            setDetalhe('Extraindo o texto e preparando a pré-visualização no navegador.');
 
-            const controlador = new AbortController();
-            const temporizador = window.setTimeout(() => controlador.abort(), 90_000);
-            const avisoIa = window.setTimeout(() => {
-                setMensagem('Aguardando sugestões contextuais (IA)...');
-                setPrevia('O modelo pode levar alguns segundos; a página não travou.');
-            }, 12_000);
+            // A requisição começa junto com a renderização local para poupar tempo.
+            const respostaApi = analisarNaApi(selecionado, () => {
+                setProgresso('Aguardando sugestões contextuais (IA)…');
+                setDetalhe(
+                    'O modelo pode levar alguns segundos; a página não travou. Após 60 s o servidor segue sem sugestões.',
+                );
+            }).then(
+                (valor) => ({ valor, falha: null as unknown | null }),
+                (falha: unknown) => ({ valor: null, falha }),
+            );
+
+            let novasPaginas: Pagina[] = [];
+            let trechos: Trecho[][] = [];
 
             try {
-                const formulario = new FormData();
-                formulario.append('arquivo', selecionado);
-
-                const resposta = await fetch('/api/analisar', {
-                    method: 'POST',
-                    body: formulario,
-                    signal: controlador.signal,
-                });
-
-                if (!resposta.ok) {
-                    const detalhe = await resposta.text();
-                    throw new Error(
-                        `API respondeu ${resposta.status}: ${detalhe.slice(0, 200)}`,
-                    );
-                }
-
-                const resultado = (await resposta.json()) as RespostaApi;
-                setMensagem('Scanner concluiu. Preparando o arquivo...');
-
-                const encontrados: Dado[] = [];
-                const paginasNovas: Pagina[] = [];
-                let semPosicao = 0;
-
                 if (tipoDetectado === 'pdf') {
                     const bytes = new Uint8Array(await selecionado.arrayBuffer());
-                    const documento = await pdfjsLib.getDocument({ data: bytes }).promise;
-                    const trechos: Trecho[] = [];
-
-                    for (let numero = 1; numero <= documento.numPages; numero++) {
-                        const pagina = await documento.getPage(numero);
-                        const escala = 1.5;
-                        const viewport = pagina.getViewport({ scale: escala });
-
-                        const canvas = document.createElement('canvas');
-                        const contexto = canvas.getContext('2d');
-                        if (!contexto) {
-                            throw new Error('Canvas 2D indisponível.');
-                        }
-                        canvas.width = Math.ceil(viewport.width);
-                        canvas.height = Math.ceil(viewport.height);
-
-                        await pagina.render({ canvasContext: contexto, viewport }).promise;
-
-                        const conteudo = await pagina.getTextContent();
-
-                        for (const item of conteudo.items) {
-                            if (!('str' in item) || !item.str || !item.str.trim()) {
-                                continue;
-                            }
-
-                            const transformacao = pdfjsLib.Util.transform(
-                                viewport.transform,
-                                item.transform,
-                            );
-                            const altura = Math.hypot(transformacao[2], transformacao[3]);
-                            trechos.push({
-                                texto: item.str,
-                                pagina: numero,
-                                x: transformacao[4],
-                                y: transformacao[5] - altura,
-                                largura: (item.width ?? 0) * escala,
-                                altura,
-                            });
-                        }
-
-                        paginasNovas.push({
-                            canvas,
-                            largura: viewport.width,
-                            altura: viewport.height,
-                            escala,
-                            regioes: [],
-                        });
-                    }
-
-                    await documento.destroy();
-
-                    resultado.itens.forEach((item, indice) => {
-                        const id = String(indice);
-                        const trecho = localizar(item, trechos);
-                        if (trecho) {
-                            paginasNovas[trecho.pagina - 1].regioes.push({
-                                id,
-                                x: trecho.x - 2,
-                                y: trecho.y - 2,
-                                largura: trecho.largura + 4,
-                                altura: trecho.altura + 4,
-                            });
-                        } else {
-                            semPosicao += 1;
-                        }
-                        encontrados.push({
-                            id,
-                            categoria: item.tipo,
-                            valor: item.dado,
-                            pagina: trecho?.pagina ?? 0,
-                            revisar: item.revisar || !trecho,
-                            origem: item.origem ?? 'deteccao',
-                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
-                            confianca: item.confianca ?? undefined,
-                        });
-                    });
+                    const renderizado = await renderizarPdf(bytes);
+                    novasPaginas = renderizado.paginas;
+                    trechos = renderizado.trechos;
                 } else if (tipoDetectado === 'imagem') {
-                    const bitmap = await createImageBitmap(selecionado);
-                    const canvas = document.createElement('canvas');
-                    canvas.width = bitmap.width;
-                    canvas.height = bitmap.height;
-                    const contexto = canvas.getContext('2d');
-                    if (!contexto) {
-                        bitmap.close();
-                        throw new Error('Canvas 2D indisponível.');
-                    }
-                    contexto.drawImage(bitmap, 0, 0);
-                    bitmap.close();
-
-                    paginasNovas.push({
-                        canvas,
-                        largura: canvas.width,
-                        altura: canvas.height,
-                        escala: 1,
-                        regioes: [],
-                    });
-
-                    const palavras = resultado.posicoes?.palavras ?? [];
-                    resultado.itens.forEach((item, indice) => {
-                        const id = String(indice);
-                        const caixa = caixaEmPalavras(item, palavras);
-                        if (caixa) {
-                            paginasNovas[0].regioes.push({ id, ...caixa });
-                        } else {
-                            semPosicao += 1;
-                        }
-                        encontrados.push({
-                            id,
-                            categoria: item.tipo,
-                            valor: item.dado,
-                            pagina: caixa ? 1 : 0,
-                            revisar: item.revisar || !caixa,
-                            origem: item.origem ?? 'deteccao',
-                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
-                            confianca: item.confianca ?? undefined,
-                        });
-                    });
+                    novasPaginas = [await carregarImagem(selecionado)];
+                    trechos = [[]];
                 } else {
-                    // Arquivo de texto: apenas sinalização. O conteúdo não é alterado.
-                    resultado.itens.forEach((item, indice) => {
-                        encontrados.push({
-                            id: String(indice),
-                            categoria: item.tipo,
-                            valor: item.dado,
-                            pagina: 0,
-                            revisar: item.revisar,
-                            origem: item.origem ?? 'deteccao',
-                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
-                            confianca: item.confianca ?? undefined,
-                        });
-                    });
+                    setProgresso('Enviando texto para o scanner…');
+                    setDetalhe('Arquivos de texto são apenas sinalizados: o original volta sem alterações.');
                 }
 
-                setPaginas(paginasNovas);
+                setProgresso('Procurando dados sensíveis…');
+                const { valor: resposta, falha: falhaApi } = await respostaApi;
+                if (falhaApi) {
+                    liberarPaginas(novasPaginas);
+                    throw falhaApi;
+                }
+
+                let encontrados: Dado[];
+                if (resposta) {
+                    if (tipoDetectado === 'imagem' && resposta.posicoes) {
+                        // O OCR devolve coordenadas no espaço original da imagem.
+                        const fator =
+                            novasPaginas[0].largura / (resposta.posicoes.largura || novasPaginas[0].largura);
+                        trechos = [
+                            resposta.posicoes.palavras.map((palavra) => ({
+                                texto: palavra.texto,
+                                x: palavra.x * fator,
+                                y: palavra.y * fator,
+                                largura: palavra.largura * fator,
+                                altura: palavra.altura * fator,
+                            })),
+                        ];
+                    }
+
+                    const indices = trechos.map((lista, indice) => indexarPagina(indice, lista));
+                    encontrados =
+                        tipoDetectado === 'texto'
+                            ? itensParaTexto(resposta.itens)
+                            : detectarComApi(resposta.itens, indices);
+                    setModo('api');
+                } else if (tipoDetectado === 'texto') {
+                    // Sem API não há texto lido no navegador para detectar padrões.
+                    encontrados = [];
+                    setModo('local');
+                } else {
+                    encontrados = detectarLocalmente(
+                        trechos.map((lista, indice) => indexarPagina(indice, lista)),
+                    );
+                    setModo('local');
+                }
+
+                setPaginas(novasPaginas);
                 setDados(encontrados);
                 // Sugestões da IA entram desmarcadas: quem decide é o cliente.
                 setSelecionados(
-                    encontrados
-                        .filter((dado) => dado.selecionarPorPadrao)
-                        .map((dado) => dado.id),
+                    new Set(encontrados.filter((dado) => dado.selecionarPorPadrao).map((dado) => dado.id)),
                 );
-                setMensagem('Análise concluída!');
-
-                const quantasIas = encontrados.filter(
-                    (dado) => dado.origem === 'contexto',
-                ).length;
-                const resumo = [
-                    `${encontrados.length} dado(s) sensível(is) sinalizado(s).`,
-                ];
-                if (quantasIas) {
-                    resumo.push(
-                        `${quantasIas} sugestão(ões) da IA aguardando sua revisão.`,
-                    );
-                }
-                if (tipoDetectado === 'texto') {
-                    resumo.push(
-                        'O arquivo será devolvido sem alterações; a censura será definida depois.',
-                    );
-                } else if (semPosicao) {
-                    resumo.push(
-                        `${semPosicao} sem posição automática: confira manualmente.`,
-                    );
-                }
-                if (!encontrados.length) {
-                    resumo.push('Nenhum dado sensível confirmado.');
-                }
-                setPrevia(resumo.join(' '));
-            } catch (erro) {
-                console.error(erro);
-                const expirou =
-                    erro instanceof DOMException && erro.name === 'AbortError';
-                limparTela();
-                if (expirou) {
-                    setMensagem('Tempo esgotado ao analisar.');
-                    setPrevia('O servidor demorou mais que o esperado. Tente novamente.');
-                    return;
-                }
-                setMensagem('Erro ao analisar o documento.');
-                setPrevia(
-                    erro instanceof Error ? erro.message : 'Não foi possível ler o documento.',
-                );
-            } finally {
-                window.clearTimeout(temporizador);
-                window.clearTimeout(avisoIa);
+                setEtapa('revisao');
+            } catch (falha) {
+                console.error(falha);
+                liberarPaginas(novasPaginas);
+                setArquivo(null);
+                setErro(falha instanceof Error ? falha.message : 'Não foi possível ler o documento.');
+                setEtapa('envio');
             }
         },
-        [limparTela],
+        [reiniciar],
     );
 
-    const aoSelecionar = useCallback(
-        (evento: ChangeEvent<HTMLInputElement>) => {
-            const selecionado = evento.target.files?.[0];
-            if (selecionado) {
-                void analisar(selecionado);
-            }
-        },
-        [analisar],
+    const alternar = useCallback((id: string) => {
+        setSelecionados((atuais) => {
+            const proximos = new Set(atuais);
+            if (proximos.has(id)) proximos.delete(id);
+            else proximos.add(id);
+            return proximos;
+        });
+    }, []);
+
+    const marcarTodos = useCallback(
+        (marcar: boolean) => setSelecionados(marcar ? new Set(dados.map((dado) => dado.id)) : new Set()),
+        [dados],
     );
 
-    const gerarArquivo = useCallback(async () => {
-        if (!arquivo || !tipo) {
-            return;
-        }
-        if (selecionados.length === 0) {
-            setMensagem('Selecione pelo menos um dado.');
-            return;
-        }
+    const localizar = useCallback((id: string) => {
+        setDestacado(id);
+        document.getElementById(`caixa-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(() => setDestacado((atual) => (atual === id ? null : atual)), 1800);
+    }, []);
 
-        setProcessando(true);
-        setMensagem('Preparando o arquivo...');
+    const desenhar = useCallback((caixa: Caixa) => {
+        const id = `manual-${crypto.randomUUID()}`;
+        setDados((atuais) => [
+            ...atuais,
+            {
+                id,
+                categoria: 'Área manual',
+                valor: 'Área desenhada',
+                caixas: [caixa],
+                pagina: caixa.pagina,
+                revisar: false,
+                origem: 'manual',
+                selecionarPorPadrao: true,
+                referenciasLgpd: [],
+            },
+        ]);
+        setSelecionados((atuais) => new Set(atuais).add(id));
+    }, []);
+
+    const remover = useCallback((id: string) => {
+        setDados((atuais) => atuais.filter((dado) => dado.id !== id));
+        setSelecionados((atuais) => {
+            const proximos = new Set(atuais);
+            proximos.delete(id);
+            return proximos;
+        });
+    }, []);
+
+    const gerar = useCallback(async () => {
+        if (!arquivo) return;
+        const escolhidos = dados.filter((dado) => selecionados.has(dado.id));
+        const caixas = escolhidos.flatMap((dado) => dado.caixas);
+        // Texto não recebe tarja: a contagem e as referências cobrem todos os
+        // itens sinalizados, inclusive as sugestões desmarcadas da IA.
+        const considerados = tipo === 'texto' ? dados : escolhidos;
+        if (tipo !== 'texto' && !caixas.length) return;
+
+        setGerando(true);
+        setErro(null);
+        setModoDesenho(false);
+        descartarResultado();
 
         try {
             const base = arquivo.name.replace(/\.[^.]+$/, '');
             let blob: Blob;
             let nome: string;
+            let previa: Resultado['paginas'];
+            const referencias = [
+                ...new Set(
+                    considerados.flatMap((dado) =>
+                        dado.referenciasLgpd.map((referencia) =>
+                            referencia.tipo
+                                ? `${referencia.titulo} (${referencia.tipo})`
+                                : referencia.titulo,
+                        ),
+                    ),
+                ),
+            ];
 
             if (tipo === 'texto') {
                 // Ainda não há regra de censura para texto: devolve o original.
                 blob = arquivo;
                 nome = arquivo.name;
-            } else if (tipo === 'imagem') {
-                const pagina = paginas[0];
-                if (!pagina) {
-                    throw new Error('Imagem não disponível.');
-                }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = pagina.canvas.width;
-                canvas.height = pagina.canvas.height;
-                const contexto = canvas.getContext('2d');
-                if (!contexto) {
-                    throw new Error('Canvas 2D indisponível.');
-                }
-                contexto.drawImage(pagina.canvas, 0, 0);
-
-                pagina.regioes.forEach((regiao) => {
-                    if (!selecionados.includes(regiao.id)) {
-                        return;
-                    }
-                    contexto.fillStyle = '#000000';
-                    contexto.fillRect(
-                        regiao.x,
-                        regiao.y,
-                        regiao.largura,
-                        regiao.altura,
-                    );
-                });
-
-                const extensao = extensaoArquivo(arquivo.name);
-                let mime = 'image/jpeg';
-                let ext = extensao;
-                if (extensao === '.png') {
-                    mime = 'image/png';
-                } else if (extensao === '.webp') {
-                    mime = 'image/webp';
-                } else if (['.tif', '.tiff', '.bmp'].includes(extensao)) {
-                    // O navegador não exporta esses formatos: usa PNG.
-                    mime = 'image/png';
-                    ext = '.png';
-                }
-
-                blob = await new Promise<Blob>((resolve, reject) => {
-                    canvas.toBlob(
-                        (resultado) =>
-                            resultado
-                                ? resolve(resultado)
-                                : reject(new Error('Falha ao exportar a imagem.')),
-                        mime,
-                        0.92,
-                    );
-                });
-                nome = `${base}_anonimizado${ext}`;
-
-                canvas.width = 0;
-                canvas.height = 0;
-            } else {
-                const pdfFinal = await PDFDocument.create();
-
-                for (const pagina of paginas) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = pagina.canvas.width;
-                    canvas.height = pagina.canvas.height;
-                    const contexto = canvas.getContext('2d');
-                    if (!contexto) {
-                        throw new Error('Canvas 2D indisponível.');
-                    }
-                    contexto.drawImage(pagina.canvas, 0, 0);
-
-                    pagina.regioes.forEach((regiao) => {
-                        if (!selecionados.includes(regiao.id)) {
-                            return;
-                        }
-                        contexto.fillStyle = '#000000';
-                        contexto.fillRect(
-                            regiao.x,
-                            regiao.y,
-                            regiao.largura,
-                            regiao.altura,
-                        );
-                    });
-
-                    const imagem = await pdfFinal.embedPng(canvas.toDataURL('image/png'));
-                    const novaPagina = pdfFinal.addPage([
-                        pagina.largura / pagina.escala,
-                        pagina.altura / pagina.escala,
-                    ]);
-                    novaPagina.drawImage(imagem, {
-                        x: 0,
-                        y: 0,
-                        width: pagina.largura / pagina.escala,
-                        height: pagina.altura / pagina.escala,
-                    });
-
+                previa = [];
+            } else if (tipo === 'pdf') {
+                const bytes = await gerarPdfCensurado(paginas, caixas);
+                blob = new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });
+                nome = `${base}_censurado.pdf`;
+                const { paginas: renderizadas } = await renderizarPdf(bytes, 1.5);
+                previa = renderizadas.map(({ url, largura, altura, canvas }) => {
                     canvas.width = 0;
                     canvas.height = 0;
-                }
-
-                const resultado = await pdfFinal.save();
-                blob = new Blob([new Uint8Array(resultado)], {
-                    type: 'application/pdf',
+                    return { url, largura, altura };
                 });
-                nome = `${base}_anonimizado.pdf`;
+            } else {
+                const imagem = await gerarImagemCensurada(paginas[0], caixas, arquivo.name);
+                blob = imagem.blob;
+                nome = `${base}_censurado.${imagem.extensao}`;
+                previa = [
+                    {
+                        url: URL.createObjectURL(blob),
+                        largura: paginas[0].largura,
+                        altura: paginas[0].altura,
+                    },
+                ];
             }
 
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = nome;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            setTimeout(() => URL.revokeObjectURL(url), 3000);
-            limparTela();
-            setMensagem(`${nome} gerado! Dados temporários limpos.`);
-        } catch (erro) {
-            console.error(erro);
-            setMensagem('Erro ao gerar o arquivo.');
+            setResultado({
+                url: URL.createObjectURL(blob),
+                nome,
+                tamanho: blob.size,
+                areas: tipo === 'texto' ? dados.length : caixas.length,
+                paginas: previa,
+                referencias,
+                texto: tipo === 'texto',
+            });
+            setEtapa('resultado');
+        } catch (falha) {
+            console.error(falha);
+            setErro('Não foi possível gerar o arquivo censurado. Tente novamente.');
         } finally {
-            setProcessando(false);
+            setGerando(false);
         }
-    }, [arquivo, tipo, selecionados, limparTela, paginas]);
+    }, [arquivo, dados, selecionados, tipo, paginas, descartarResultado]);
 
-    const itens = dados.map((dado) =>
-        createElement(
-            'label',
-            { key: dado.id, className: 'dado-item' },
-            createElement('input', {
-                type: 'checkbox',
-                checked: selecionados.includes(dado.id),
-                value: dado.id,
-                onChange: (evento: ChangeEvent<HTMLInputElement>) =>
-                    alternar(dado.id, evento.target.checked),
-            }),
-            createElement('span', { className: 'dado-tipo' }, dado.categoria),
-            createElement('span', { className: 'dado-valor' }, dado.valor),
-            dado.origem === 'contexto'
-                ? createElement('span', { className: 'dado-origem-ia' }, 'IA')
-                : null,
-            dado.revisar
-                ? createElement('span', { className: 'dado-revisar' }, 'revisar')
-                : null,
-        ),
-    );
+    const voltarParaRevisao = useCallback(() => {
+        descartarResultado();
+        setEtapa('revisao');
+    }, [descartarResultado]);
 
-    return createElement(
-        Fragment,
-        null,
-        createElement(Sidebar),
-        createElement(
-            'main',
-            null,
-            createElement(
-                'header',
-                null,
-                createElement('h1', null, 'Anonimização de Documentos'),
-                createElement(
-                    'p',
-                    null,
-                    'Envie PDF, imagem ou texto, revise os dados e baixe no formato original.',
-                ),
-            ),
-            createElement(
-                'section',
-                { className: 'upload' },
-                createElement('h2', null, 'Enviar arquivo'),
-                createElement(
-                    'div',
-                    { className: 'arquivo-caixa' },
-                    createElement('input', {
-                        type: 'file',
-                        id: 'arquivo',
-                        key: chaveInput,
-                        className: 'arquivo-input',
-                        accept: ACEITAS.join(','),
-                        onChange: aoSelecionar,
-                    }),
-                    createElement(
-                        'label',
-                        { htmlFor: 'arquivo', className: 'arquivo-dropzone' },
-                        createElement(
-                            'svg',
-                            {
-                                className: 'arquivo-icone',
-                                viewBox: '0 0 24 24',
-                                fill: 'none',
-                                stroke: 'currentColor',
-                                strokeWidth: 1.8,
-                                strokeLinecap: 'round',
-                                strokeLinejoin: 'round',
-                                'aria-hidden': 'true',
-                            },
-                            createElement('path', { d: 'M12 16V4m0 0L8 8m4-4 4 4' }),
-                            createElement('path', {
-                                d: 'M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3',
+    const etapaAtual = etapa === 'resultado' ? 2 : etapa === 'revisao' ? 1 : 0;
+
+    return h(
+        'div',
+        { className: 'flex min-h-dvh flex-col lg:h-dvh' },
+        h(AppHeader, { etapaAtual }),
+        etapa === 'envio' ? h(UploadZone, { onArquivo: analisar, erro }) : null,
+        etapa === 'analisando' && arquivo
+            ? h(AnalysisProgress, { nomeArquivo: arquivo.name, mensagem: progresso, detalhe })
+            : null,
+        etapa === 'revisao' && arquivo
+            ? h(
+                  'main',
+                  { className: 'flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_400px]' },
+                  h(
+                      'div',
+                      { className: 'flex flex-col lg:min-h-0 lg:overflow-y-auto' },
+                      modoDesenho
+                          ? h(
+                                'p',
+                                {
+                                    role: 'status',
+                                    className:
+                                        'sticky top-0 z-10 border-b border-border bg-accent px-4 py-2 text-center text-sm font-medium text-accent-foreground',
+                                },
+                                'Arraste sobre a página para cobrir uma área.',
+                            )
+                          : null,
+                      tipo === 'texto'
+                          ? h(
+                                'section',
+                                {
+                                    className:
+                                        'flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center',
+                                },
+                                h('h2', { className: 'text-lg font-semibold' }, 'Arquivo de texto'),
+                                h(
+                                    'p',
+                                    { className: 'max-w-md text-sm leading-relaxed text-muted-foreground' },
+                                    'O conteúdo é enviado só para a API detectar dados. Não há pré-visualização visual e o original será devolvido sem alterações.',
+                                ),
+                            )
+                          : h(DocumentViewer, {
+                                rotulo: 'Documento original com dados destacados',
+                                paginas: paginas.map((pagina) => ({
+                                    url: pagina.url,
+                                    largura: pagina.largura,
+                                    altura: pagina.altura,
+                                })),
+                                dados,
+                                selecionados,
+                                destacado,
+                                modoDesenho,
+                                onAlternar: alternar,
+                                onDesenhar: desenhar,
                             }),
-                        ),
-                        createElement(
-                            'span',
-                            { className: 'arquivo-titulo' },
-                            arquivo ? arquivo.name : 'Escolher arquivo',
-                        ),
-                        createElement(
-                            'span',
-                            { className: 'arquivo-dica' },
-                            'PDF, imagem ou texto — clique para selecionar',
-                        ),
-                    ),
-                ),
-                createElement('p', { id: 'mensagem' }, mensagem),
-            ),
-            createElement(
-                'section',
-                { className: 'dados' },
-                createElement('h2', null, 'Dados identificados'),
-                createElement(
-                    'p',
-                    null,
-                    'Selecione as informações que deseja anonimizar.',
-                ),
-                createElement('div', { id: 'lista-dados' }, ...itens),
-            ),
-            createElement(
-                'section',
-                { className: 'preview' },
-                createElement('h2', null, 'Visualização do resultado'),
-                createElement('div', { id: 'previa' }, previa),
-            ),
-            createElement(
-                'section',
-                { className: 'download' },
-                createElement('h2', null, 'Baixar arquivo'),
-                createElement(
-                    'p',
-                    null,
-                    'O arquivo volta no formato original. Textos são apenas sinalizados.',
-                ),
-                createElement(
-                    'button',
-                    {
-                        id: 'baixar',
-                        disabled: processando || dados.length === 0,
-                        onClick: () => void gerarArquivo(),
-                    },
-                    'Baixar no formato original',
-                ),
-            ),
-        ),
+                  ),
+                  h(FindingsPanel, {
+                      nomeArquivo: arquivo.name,
+                      tipo,
+                      modo,
+                      dados,
+                      selecionados,
+                      modoDesenho,
+                      gerando,
+                      erro,
+                      onAlternar: alternar,
+                      onTodos: marcarTodos,
+                      onLocalizar: localizar,
+                      onRemover: remover,
+                      onModoDesenho: setModoDesenho,
+                      onGerar: () => void gerar(),
+                      onCancelar: reiniciar,
+                  }),
+              )
+            : null,
+        etapa === 'resultado' && resultado
+            ? h(
+                  'main',
+                  { className: 'flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_400px]' },
+                  h(
+                      'div',
+                      { className: 'lg:min-h-0 lg:overflow-y-auto' },
+                      resultado.paginas.length > 0
+                          ? h(DocumentViewer, {
+                                rotulo: 'Pré-visualização do documento censurado',
+                                paginas: resultado.paginas,
+                            })
+                          : h(
+                                'section',
+                                {
+                                    className:
+                                        'flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center',
+                                },
+                                h('h2', { className: 'text-lg font-semibold' }, 'Texto sinalizado'),
+                                h(
+                                    'p',
+                                    { className: 'max-w-md text-sm leading-relaxed text-muted-foreground' },
+                                    'O arquivo original está pronto para download. Nenhum caractere foi alterado.',
+                                ),
+                            ),
+                  ),
+                  h(ResultPanel, {
+                      resultado,
+                      referencias: resultado.referencias,
+                      onVoltar: voltarParaRevisao,
+                      onNovo: reiniciar,
+                  }),
+              )
+            : null,
     );
 }

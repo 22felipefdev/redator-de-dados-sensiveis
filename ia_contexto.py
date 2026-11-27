@@ -96,6 +96,40 @@ def _localizar(trecho: str, texto: str, dica: int) -> int | None:
     return melhor
 
 
+def _ampliar_saude(texto: str, inicio: int, fim: int) -> tuple[int, int]:
+    """Inclui até 4 palavras anteriores na mesma frase de uma sugestão curta.
+
+    Serve para "HIV" virar "portador do vírus HIV". Só usa o texto recebido:
+    nunca cria, corrige ou completa caractere algum.
+    """
+    max_palavras = 4
+    limitadores = set(".,;:!?()[]{}\n\r")
+    novo_inicio = inicio
+    palavras = 0
+    indice = inicio - 1
+
+    while indice >= 0 and palavras < max_palavras:
+        caractere = texto[indice]
+        if caractere in limitadores:
+            break
+        if caractere.isspace():
+            indice -= 1
+            continue
+        # Volta até o primeiro caractere da palavra anterior.
+        while (
+            indice >= 0
+            and not texto[indice].isspace()
+            and texto[indice] not in limitadores
+        ):
+            indice -= 1
+        novo_inicio = indice + 1
+        palavras += 1
+        while indice >= 0 and texto[indice].isspace():
+            indice -= 1
+
+    return max(0, novo_inicio), fim
+
+
 def _validar(sugestoes: list[SugestaoContexto], texto: str) -> list[dict]:
     """Descarta sugestão que não seja cópia literal do texto recebido."""
     validadas = []
@@ -118,13 +152,17 @@ def _validar(sugestoes: list[SugestaoContexto], texto: str) -> list[dict]:
         if not contexto:
             continue
 
+        # Doença curta ("HIV") ganha o trecho literal anterior da mesma frase.
+        if sugestao.categoria == "SAUDE" and len(sugestao.trecho.split()) <= 2:
+            inicio, fim = _ampliar_saude(texto, inicio, fim)
+
         chave = (inicio, fim, sugestao.categoria)
         if chave in vistas:
             continue
         vistas.add(chave)
 
         validadas.append({
-            "trecho": sugestao.trecho,
+            "trecho": texto[inicio:fim],
             "inicio": inicio,
             "fim": fim,
             "categoria": sugestao.categoria,
@@ -178,6 +216,8 @@ def _consultar(texto: str, api_key: str) -> list[dict]:
                    política, filiação sindical ou partidária, vida sexual, orientação sexual,
                    planejamento familiar, dados genéticos/biométricos, origem étnica/racial,
                    filiação e menoridade.
+                   Em SAUDE, copie a frase completa literal que contextualiza a condição
+                   (ex.: "portador do vírus HIV"), e não apenas a sigla ou o nome isolado.
                 6. Use somente uma destas categorias, em maiúsculas:
                    NOME_PESSOA, ENDERECO, SAUDE, RELIGIAO, POLITICA, SINDICATO, SEXUALIDADE,
                    ORIENTACAO_SEXUAL, PLANEJAMENTO_FAMILIAR, GENETICO_BIOMETRICO, ETNIA_RACA,
@@ -231,6 +271,22 @@ def _consultar(texto: str, api_key: str) -> list[dict]:
                       "categoria": "SAUDE",
                       "contexto_presidio": ["uso", "diagnóstico"],
                       "confianca": 0.88
+                    }
+                  ]
+                }
+
+                Documento:
+                "Paciente portador do vírus HIV, em acompanhamento na clínica."
+                Saída:
+                {
+                  "sugestoes": [
+                    {
+                      "trecho": "portador do vírus HIV",
+                      "inicio": 9,
+                      "fim": 31,
+                      "categoria": "SAUDE",
+                      "contexto_presidio": ["Paciente", "acompanhamento"],
+                      "confianca": 0.94
                     }
                   ]
                 }
