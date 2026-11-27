@@ -84,6 +84,9 @@ interface ItemApi {
     risco: string;
     revisar: boolean;
     original: string | null;
+    origem?: string;
+    selecionar_por_padrao?: boolean;
+    confianca?: number | null;
 }
 
 interface RespostaApi {
@@ -98,6 +101,9 @@ interface Dado {
     valor: string;
     pagina: number;
     revisar: boolean;
+    origem: string;
+    selecionarPorPadrao: boolean;
+    confianca?: number;
 }
 
 // Comparação tolerante a pontuação, espaços e acentos: o backend devolve o
@@ -250,11 +256,15 @@ export default function App() {
 
             setArquivo(selecionado);
             setTipo(tipoDetectado);
-            setMensagem('Enviando para o scanner (OCR + Presidio)...');
+            setMensagem('Enviando para o scanner (OCR + Presidio + IA)...');
             setPrevia('Aguardando a API Python...');
 
             const controlador = new AbortController();
             const temporizador = window.setTimeout(() => controlador.abort(), 90_000);
+            const avisoIa = window.setTimeout(() => {
+                setMensagem('Aguardando sugestões contextuais (IA)...');
+                setPrevia('O modelo pode levar alguns segundos; a página não travou.');
+            }, 12_000);
 
             try {
                 const formulario = new FormData();
@@ -353,6 +363,9 @@ export default function App() {
                             valor: item.dado,
                             pagina: trecho?.pagina ?? 0,
                             revisar: item.revisar || !trecho,
+                            origem: item.origem ?? 'deteccao',
+                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
+                            confianca: item.confianca ?? undefined,
                         });
                     });
                 } else if (tipoDetectado === 'imagem') {
@@ -391,6 +404,9 @@ export default function App() {
                             valor: item.dado,
                             pagina: caixa ? 1 : 0,
                             revisar: item.revisar || !caixa,
+                            origem: item.origem ?? 'deteccao',
+                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
+                            confianca: item.confianca ?? undefined,
                         });
                     });
                 } else {
@@ -402,18 +418,34 @@ export default function App() {
                             valor: item.dado,
                             pagina: 0,
                             revisar: item.revisar,
+                            origem: item.origem ?? 'deteccao',
+                            selecionarPorPadrao: item.selecionar_por_padrao ?? true,
+                            confianca: item.confianca ?? undefined,
                         });
                     });
                 }
 
                 setPaginas(paginasNovas);
                 setDados(encontrados);
-                setSelecionados(encontrados.map((dado) => dado.id));
+                // Sugestões da IA entram desmarcadas: quem decide é o cliente.
+                setSelecionados(
+                    encontrados
+                        .filter((dado) => dado.selecionarPorPadrao)
+                        .map((dado) => dado.id),
+                );
                 setMensagem('Análise concluída!');
 
+                const quantasIas = encontrados.filter(
+                    (dado) => dado.origem === 'contexto',
+                ).length;
                 const resumo = [
                     `${encontrados.length} dado(s) sensível(is) sinalizado(s).`,
                 ];
+                if (quantasIas) {
+                    resumo.push(
+                        `${quantasIas} sugestão(ões) da IA aguardando sua revisão.`,
+                    );
+                }
                 if (tipoDetectado === 'texto') {
                     resumo.push(
                         'O arquivo será devolvido sem alterações; a censura será definida depois.',
@@ -443,6 +475,7 @@ export default function App() {
                 );
             } finally {
                 window.clearTimeout(temporizador);
+                window.clearTimeout(avisoIa);
             }
         },
         [limparTela],
@@ -615,6 +648,9 @@ export default function App() {
             }),
             createElement('span', { className: 'dado-tipo' }, dado.categoria),
             createElement('span', { className: 'dado-valor' }, dado.valor),
+            dado.origem === 'contexto'
+                ? createElement('span', { className: 'dado-origem-ia' }, 'IA')
+                : null,
             dado.revisar
                 ? createElement('span', { className: 'dado-revisar' }, 'revisar')
                 : null,

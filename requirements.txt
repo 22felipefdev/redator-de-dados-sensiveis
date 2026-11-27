@@ -1,6 +1,8 @@
 fastapi==0.165.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.34
+instructor==1.18.0
+openai==3.60.0
 presidio-analyzer==2.2.366
 spacy==3.8.18
 pytesseract==0.3.13

@@ -10,8 +10,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from conhecimento_lgpd import referencias
 from detector import identificar_dados_sensiveis
 from ocr import EXTENSOES_IMAGEM, EXTENSOES_TEXTO, extrair_texto
 from ocr_posicoes import analisar_imagem
@@ -62,6 +63,11 @@ OCR_CONCORRENCIA = max(1, int(os.getenv("OCR_CONCORRENCIA", "2")))
 FILA_ESPERA = max(0.0, float(os.getenv("FILA_ESPERA", "5")))
 _limite_ocr = threading.BoundedSemaphore(OCR_CONCORRENCIA)
 
+# A IA é opt-in: sem isso o gate e os testes dependeriam de rede e de modelo.
+IA_CONTEXTO = os.getenv("IA_CONTEXTO", "0").strip().lower() in {
+    "1", "true", "sim", "on", "yes",
+}
+
 
 def _versao_ocr():
     """Invalida o cache quando o pré-processamento ou o OCR mudar."""
@@ -106,12 +112,27 @@ class PosicoesResponse(BaseModel):
     palavras: list[PalavraResponse]
 
 
+class ReferenciaResponse(BaseModel):
+    id: str
+    titulo: str
+    texto: str
+    tipo: str
+    url: str
+
+
 class ItemResponse(BaseModel):
     dado: str
     tipo: str
     risco: str
     revisar: bool = False
     original: str | None = None
+    # Campos opcionais preservam o contrato antigo; só itens de contexto os usam.
+    origem: str = "deteccao"
+    selecionar_por_padrao: bool = True
+    inicio: int | None = None
+    fim: int | None = None
+    confianca: float | None = None
+    referencias_lgpd: list[ReferenciaResponse] = Field(default_factory=list)
 
 
 class AnaliseResponse(BaseModel):
@@ -122,6 +143,32 @@ class AnaliseResponse(BaseModel):
 
 def _chave_cache(conteudo: bytes) -> str:
     return hashlib.sha256(conteudo).hexdigest() + VERSAO_CACHE
+
+
+def _itens_contexto(texto: str) -> list[dict]:
+    """Sugestões da IA: apenas pistas, nunca marcadas por padrão."""
+    # Importe tardio: com a flag desligada, a API não carrega a biblioteca da IA.
+    from ia_contexto import sugerir_dados_sensiveis
+
+    itens = []
+    for sugestao in sugerir_dados_sensiveis(texto):
+        itens.append(
+            {
+                "dado": sugestao["trecho"],
+                "tipo": sugestao["categoria"],
+                "risco": "contexto",
+                "revisar": True,
+                "original": None,
+                "origem": "contexto",
+                "selecionar_por_padrao": False,
+                "inicio": sugestao["inicio"],
+                "fim": sugestao["fim"],
+                "confianca": sugestao["confianca"],
+                # LGPD vem da lei, não do modelo: nada é inventado pela IA.
+                "referencias_lgpd": referencias(sugestao["categoria"]),
+            }
+        )
+    return itens
 
 
 def assinatura_valida(conteudo: bytes, extensao: str) -> bool:
@@ -234,17 +281,30 @@ def analisar(arquivo: UploadFile = File(...)):
         len(relatorio.itens),
     )
 
+    itens = [
+        {
+            "dado": item.dado,
+            "tipo": item.tipo,
+            "risco": item.risco,
+            "revisar": item.revisar,
+            "original": item.original,
+        }
+        for item in relatorio.itens
+    ]
+
+    if IA_CONTEXTO:
+        logger.info("solicitando sugestoes contextuais...")
+        inicio_ia = time.perf_counter()
+        sugestoes = _itens_contexto(texto)
+        itens.extend(sugestoes)
+        logger.info(
+            "sugestoes contextuais=%d em %.0f ms",
+            len(sugestoes),
+            (time.perf_counter() - inicio_ia) * 1000,
+        )
+
     return {
         "arquivo": nome,
         "posicoes": posicoes,
-        "itens": [
-            {
-                "dado": item.dado,
-                "tipo": item.tipo,
-                "risco": item.risco,
-                "revisar": item.revisar,
-                "original": item.original,
-            }
-            for item in relatorio.itens
-        ],
+        "itens": itens,
     }

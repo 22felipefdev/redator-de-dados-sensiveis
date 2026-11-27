@@ -1,0 +1,118 @@
+{
+  "fonte": "Lei nº 13.709, de 14 de agosto de 2018 (LGPD) - texto compilado",
+  "url": "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm",
+  "coletado_em": "2026-11-27",
+  "aviso": "Recortes de texto de domínio público. Não é orientação jurídica; confira a redação vigente na fonte oficial.",
+  "artigos": [
+    {
+      "id": "art5-I",
+      "titulo": "Art. 5º, I - dado pessoal",
+      "texto": "I - dado pessoal: informação relacionada a pessoa natural identificada ou identificável;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art5-II",
+      "titulo": "Art. 5º, II - dado pessoal sensível",
+      "texto": "II - dado pessoal sensível: dado pessoal sobre origem racial ou étnica, convicção religiosa, opinião política, filiação a sindicato ou a organização de caráter religioso, filosófico ou político, dado referente à saúde ou à vida sexual, dado genético ou biométrico, quando vinculado a uma pessoa natural;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art5-III",
+      "titulo": "Art. 5º, III - dado anonimizado",
+      "texto": "III - dado anonimizado: dado relativo a titular que não possa ser identificado, considerando a utilização de meios técnicos razoáveis e disponíveis na ocasião de seu tratamento;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art6-III",
+      "titulo": "Art. 6º, III - princípio da necessidade",
+      "texto": "III - necessidade: limitação do tratamento ao mínimo necessário para a realização de suas finalidades, com abrangência dos dados pertinentes, proporcionais e não excessivos em relação às finalidades do tratamento de dados;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art6-VII",
+      "titulo": "Art. 6º, VII - princípio da segurança",
+      "texto": "VII - segurança: utilização de medidas técnicas e administrativas aptas a proteger os dados pessoais de acessos não autorizados e de situações acidentais ou ilícitas de destruição, perda, alteração, comunicação ou difusão;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art7",
+      "titulo": "Art. 7º - bases legais (caps)",
+      "texto": "O tratamento de dados pessoais somente poderá ser realizado nas seguintes hipóteses:",
+      "tipo": "literal"
+    },
+    {
+      "id": "art7-VIII",
+      "titulo": "Art. 7º, VIII - tutela da saúde",
+      "texto": "VIII - para a tutela da saúde, em procedimento realizado por profissionais da área da saúde ou por entidades sanitárias;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art11",
+      "titulo": "Art. 11 - tratamento de dados sensíveis (caps)",
+      "texto": "O tratamento de dados pessoais sensíveis somente poderá ocorrer nas seguintes hipóteses:",
+      "tipo": "literal"
+    },
+    {
+      "id": "art11-I",
+      "titulo": "Art. 11, I - consentimento específico",
+      "texto": "I - quando o titular ou seu responsável legal consentir, de forma específica e destacada, para finalidades específicas;",
+      "tipo": "literal"
+    },
+    {
+      "id": "art11-1",
+      "titulo": "Art. 11, § 1º",
+      "texto": "Aplica-se o disposto neste artigo a qualquer tratamento de dados pessoais que revele dados pessoais sensíveis e que possa causar dano ao titular, ressalvado o disposto em legislação específica.",
+      "tipo": "literal"
+    },
+    {
+      "id": "art14",
+      "titulo": "Art. 14 - crianças e adolescentes (caps)",
+      "texto": "O tratamento de dados pessoais de crianças e de adolescentes deverá ser realizado em seu melhor interesse, nos termos deste artigo e da legislação pertinente.",
+      "tipo": "literal"
+    },
+    {
+      "id": "art14-1",
+      "titulo": "Art. 14, § 1º",
+      "texto": "O tratamento de dados pessoais de crianças deverá ser realizado com o consentimento específico e em destaque dado por pelo menos um dos pais ou pelo responsável legal.",
+      "tipo": "literal"
+    },
+    {
+      "id": "art18",
+      "titulo": "Art. 18 - direitos do titular (caps)",
+      "texto": "O titular dos dados pessoais tem direito a obter do controlador, em relação aos dados do titular por ele tratados, a qualquer momento e mediante requisição:",
+      "tipo": "literal"
+    },
+    {
+      "id": "art18-IV",
+      "titulo": "Art. 18, IV",
+      "texto": "IV - anonimização, bloqueio ou eliminação de dados desnecessários, excessivos ou tratados em desconformidade com o disposto nesta Lei;",
+      "tipo": "literal"
+    },
+    {
+      "id": "interpretacao-planejamento-familiar",
+      "titulo": "Planejamento familiar (interpretação, não texto literal)",
+      "texto": "O inciso II do art. 5º cita expressamente 'vida sexual', mas não cita 'planejamento familiar'. A inclusão do planejamento familiar entre os dados sensíveis decorre de interpretação doutrinária ligada à autonomia reprodutiva e à vida sexual; não deve ser apresentada como redação literal da lei.",
+      "tipo": "interpretacao"
+    }
+  ],
+  "categorias": {
+    "NOME_PESSOA": ["art5-I", "art6-III"],
+    "ENDERECO": ["art5-I", "art6-III"],
+    "FILIACAO": ["art5-I"],
+    "SAUDE": ["art5-II", "art11", "art7-VIII"],
+    "RELIGIAO": ["art5-II", "art11"],
+    "POLITICA": ["art5-II", "art11"],
+    "SINDICATO": ["art5-II", "art11"],
+    "SEXUALIDADE": ["art5-II", "art11"],
+    "ORIENTACAO_SEXUAL": ["art5-II", "art11-1"],
+    "PLANEJAMENTO_FAMILIAR": ["interpretacao-planejamento-familiar", "art5-II"],
+    "GENETICO_BIOMETRICO": ["art5-II", "art11"],
+    "ETNIA_RACA": ["art5-II", "art11"],
+    "MENOR_IDADE": ["art14", "art14-1"]
+  },
+  "notas": {
+    "FILIACAO": "Aqui significa filiação familiar (nome dos pais), enquadrada como dado pessoal comum (art. 5º, I). Filiação sindical ou partidária é dado sensível (art. 5º, II) e deve usar as categorias SINDICATO ou POLITICA.",
+    "ORIENTACAO_SEXUAL": "Não é enumerada literalmente no art. 5º, II; a referência usa o § 1º do art. 11, que cobre tratamento que revele dado sensível e possa causar dano.",
+    "PLANEJAMENTO_FAMILIAR": "Ver artigo 'interpretacao-planejamento-familiar'. Nunca apresentar como texto literal da lei."
+  }
+}

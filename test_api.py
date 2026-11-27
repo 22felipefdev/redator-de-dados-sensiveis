@@ -1,12 +1,16 @@
 """Testes da API. Execute: docker compose exec api python -m unittest -v test_api"""
 import io
+import os
+import time
 import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
+import instructor
 
 import api
+import ia_contexto
 import ocr_posicoes
 from api import app
 
@@ -201,6 +205,170 @@ class TesteAnalise(unittest.TestCase):
         self.assertEqual(resposta.status_code, 500)
         self.assertTrue(api._limite_ocr.acquire(blocking=False))
         api._limite_ocr.release()
+
+    def test_contexto_desligado_por_padrao(self):
+        resposta = cliente.post(
+            "/api/analisar",
+            files={
+                "arquivo": (
+                    "padrao.txt",
+                    b"Paciente relatou diagnostico.\n",
+                    "text/plain",
+                )
+            },
+        )
+        self.assertEqual(resposta.status_code, 200)
+        self.assertTrue(
+            all(item["origem"] == "deteccao" for item in resposta.json()["itens"])
+        )
+
+    def test_sugestao_da_ia_nao_vem_marcada(self):
+        sugestoes = [
+            {
+                "trecho": "diagnóstico de diabetes",
+                "inicio": 43,
+                "fim": 66,
+                "categoria": "SAUDE",
+                "contexto_presidio": ["Paciente"],
+                "confianca": 0.93,
+            }
+        ]
+        with (
+            patch.object(api, "IA_CONTEXTO", True),
+            patch("ia_contexto.sugerir_dados_sensiveis", return_value=sugestoes),
+        ):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={
+                    "arquivo": (
+                        "contexto.txt",
+                        b"Paciente compareceu ao consultorio.\n",
+                        "text/plain",
+                    )
+                },
+            )
+
+        self.assertEqual(resposta.status_code, 200)
+        contextuais = [
+            item for item in resposta.json()["itens"]
+            if item["origem"] == "contexto"
+        ]
+        self.assertEqual(len(contextuais), 1)
+        self.assertEqual(contextuais[0]["dado"], "diagnóstico de diabetes")
+        self.assertEqual(contextuais[0]["tipo"], "SAUDE")
+        self.assertFalse(contextuais[0]["selecionar_por_padrao"])
+        self.assertTrue(contextuais[0]["revisar"])
+        self.assertNotIn("compareceu ao consultorio", resposta.text)
+
+    def test_referencia_lgpd_vem_da_base_oficial(self):
+        import conhecimento_lgpd
+
+        sugestoes = [
+            {
+                "trecho": "diagnóstico de diabetes",
+                "inicio": 0,
+                "fim": 23,
+                "categoria": "SAUDE",
+                "contexto_presidio": ["diagnóstico"],
+                "confianca": 0.93,
+            }
+        ]
+        with (
+            patch.object(api, "IA_CONTEXTO", True),
+            patch("ia_contexto.sugerir_dados_sensiveis", return_value=sugestoes),
+        ):
+            resposta = cliente.post(
+                "/api/analisar",
+                files={
+                    "arquivo": (
+                        "lgpd.txt",
+                        "diagnóstico de diabetes\n".encode("utf-8"),
+                        "text/plain",
+                    )
+                },
+            )
+
+        contextual = next(
+            item for item in resposta.json()["itens"]
+            if item["origem"] == "contexto"
+        )
+        ids = {ref["id"] for ref in contextual["referencias_lgpd"]}
+        self.assertIn("art5-II", ids)
+        self.assertIn("art11", ids)
+        self.assertTrue(
+            all(ref["tipo"] == "literal" for ref in contextual["referencias_lgpd"])
+        )
+        # Categoria sem redação literal na lei precisa vir marcada como interpretação.
+        interpretacoes = conhecimento_lgpd.referencias("PLANEJAMENTO_FAMILIAR")
+        self.assertTrue(any(ref["tipo"] == "interpretacao" for ref in interpretacoes))
+
+    def test_offsets_errados_sao_recalculados_pelo_trecho(self):
+        texto = "Paciente com diagnóstico de asma."
+        sugestoes = [
+            ia_contexto.SugestaoContexto(
+                trecho="diagnóstico de asma",
+                inicio=0,  # errado de propósito, como o Gemini costuma devolver
+                fim=5,
+                categoria="SAUDE",
+                contexto_presidio=["Paciente"],
+                confianca=0.9,
+            )
+        ]
+        resultado = ia_contexto._validar(sugestoes, texto)
+
+        self.assertEqual(len(resultado), 1)
+        item = resultado[0]
+        self.assertEqual(item["inicio"], texto.index("diagnóstico de asma"))
+        self.assertEqual(texto[item["inicio"]:item["fim"]], item["trecho"])
+
+    def test_modo_gemini_usa_function_calling(self):
+        with patch.object(
+            ia_contexto,
+            "BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+        ):
+            self.assertEqual(ia_contexto.modo_instructor(), instructor.Mode.TOOLS)
+
+        with patch.object(ia_contexto, "BASE_URL", "https://openrouter.ai/api/v1"):
+            self.assertEqual(ia_contexto.modo_instructor(), instructor.Mode.JSON)
+
+    def test_chave_api_aceita_provedor_alternativo(self):
+        with patch.dict(
+            os.environ,
+            {"IA_API_KEY": "chave-ia", "OPENROUTER_API_KEY": "chave-antiga"},
+        ):
+            self.assertEqual(ia_contexto.chave_api(), "chave-ia")
+
+        with patch.dict(
+            os.environ,
+            {"IA_API_KEY": "", "OPENROUTER_API_KEY": "chave-antiga"},
+        ):
+            self.assertEqual(ia_contexto.chave_api(), "chave-antiga")
+
+    def test_ia_lenta_guarda_resposta_tardia_em_cache(self):
+        def consulta_lenta(_texto: str, _api_key: str):
+            time.sleep(0.4)
+            return [{"trecho": "diagnóstico de diabetes"}]
+
+        texto = "Paciente com diagnóstico de diabetes."
+        esperado = [{"trecho": "diagnóstico de diabetes"}]
+        ia_contexto._cache.clear()
+        with (
+            patch.dict(os.environ, {"OPENROUTER_API_KEY": "teste"}),
+            patch.object(ia_contexto, "TEMPO_TOTAL", 0.1),
+            patch.object(ia_contexto, "_consultar", side_effect=consulta_lenta),
+        ):
+            inicio = time.perf_counter()
+            primeiro = ia_contexto.sugerir_dados_sensiveis(texto)
+            decorrido = time.perf_counter() - inicio
+
+            self.assertEqual(primeiro, [])
+            self.assertLess(decorrido, 0.3)
+
+            time.sleep(0.5)
+            self.assertEqual(ia_contexto.sugerir_dados_sensiveis(texto), esperado)
+
+        ia_contexto._cache.clear()
 
 
 class TesteMetricaDeLog(unittest.TestCase):

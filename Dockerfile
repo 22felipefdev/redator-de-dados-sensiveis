@@ -18,8 +18,9 @@ COPY requirements.lock.txt .
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 
 # Código explícito: somente os módulos usados pela API entram na imagem.
-COPY api.py detector.py ocr.py ocr_posicoes.py presidio_detector.py \
-     regex_parser.py test_api.py ./
+COPY api.py conhecimento_lgpd.py detector.py ia_contexto.py ocr.py \
+     ocr_posicoes.py presidio_detector.py regex_parser.py test_api.py ./
+COPY knowledge/lgpd.json ./knowledge/lgpd.json
 
 RUN chown -R appuser:appuser /app
 USER appuser

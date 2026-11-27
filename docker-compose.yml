@@ -9,6 +9,14 @@ services:
     restart: unless-stopped
     environment:
       PYTHONUNBUFFERED: "1"
+      # Laboratório de IA: desligado por padrão. A chave vem do .env da raiz
+      # (interpolado pelo Compose), nunca do repositório.
+      IA_CONTEXTO: "${IA_CONTEXTO:-0}"
+      IA_MODELO: "${IA_MODELO:-}"
+      IA_BASE_URL: "${IA_BASE_URL:-}"
+      IA_API_KEY: "${IA_API_KEY:-}"
+      IA_TEMPO_TOTAL: "${IA_TEMPO_TOTAL:-60}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       # Em produção, substitua pela origem real do front-end:
       # CORS_ORIGINS: "https://privacydocs.example.com"
     ports:
@@ -20,7 +28,10 @@ services:
     # Hot reload do Python sem trazer .venv, corpus nem imagens para o container.
     volumes:
       - ./api.py:/app/api.py:ro
+      - ./conhecimento_lgpd.py:/app/conhecimento_lgpd.py:ro
+      - ./knowledge:/app/knowledge:ro
       - ./detector.py:/app/detector.py:ro
+      - ./ia_contexto.py:/app/ia_contexto.py:ro
       - ./ocr.py:/app/ocr.py:ro
       - ./ocr_posicoes.py:/app/ocr_posicoes.py:ro
       - ./presidio_detector.py:/app/presidio_detector.py:ro
